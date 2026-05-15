@@ -62,7 +62,7 @@ class AboutScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 32),
                   Text(
-                    "UniTransit", 
+                    (appInfo.appName ?? "UniTransit").isEmpty ? "UniTransit" : appInfo.appName, 
                     style: GoogleFonts.poppins(
                       fontSize: 32, 
                       fontWeight: FontWeight.w900, 
@@ -72,7 +72,7 @@ class AboutScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    "Smart University Transport System", 
+                    (appInfo.appTagline ?? "Smart University Transport System").isEmpty ? "Smart University Transport System" : appInfo.appTagline, 
                     textAlign: TextAlign.center,
                     style: GoogleFonts.poppins(
                       fontSize: 12, 
@@ -103,7 +103,7 @@ class AboutScreen extends ConsumerWidget {
                   
                   // Project Details Section
                   _buildDetailSection(
-                    title: "PROJECT VISION",
+                    title: appInfo.visionHeader.isEmpty ? "PROJECT VISION" : appInfo.visionHeader.toUpperCase(),
                     content: appInfo.vision.isEmpty 
                       ? "UniTransit is a state-of-the-art solution designed for The Islamia University of Bahawalpur to digitize the bus tracking experience. It leverages real-time GPS data, Firebase synchronization, and smart routing algorithms to ensure students never miss their commute."
                       : appInfo.vision,
@@ -142,8 +142,6 @@ class AboutScreen extends ConsumerWidget {
                             letterSpacing: 1.5
                           )
                         ),
-                        const SizedBox(height: 12),
-                        const Icon(Icons.school_rounded, color: Colors.white, size: 28),
                       ],
                     ),
                   ),

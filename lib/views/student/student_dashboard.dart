@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/widgets/student_drawer.dart';
 import 'package:uni_transit/widgets/custom_app_bar.dart';
+import 'package:uni_transit/core/routes/app_routes.dart';
+
 import 'map_screen.dart';
 import 'schedule_screen.dart';
 
@@ -34,7 +36,15 @@ class StudentDashboard extends ConsumerWidget {
         title: currentIndex == 0 ? "STUDENT DASHBOARD" : "SCHEDULE",
         showLogo: false,
         showBackArrow: false,
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.pushNamed(context, AppRoutes.notifications),
+            icon: const Icon(Icons.notifications_outlined),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
+
       drawer: const StudentDrawer(),
       body: IndexedStack(
         index: currentIndex,

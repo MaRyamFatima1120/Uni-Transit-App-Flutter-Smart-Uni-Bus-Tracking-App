@@ -23,6 +23,8 @@ import '../../views/admin/admin_dashboard.dart';
 import '../../views/live_tracking_screen.dart';
 import '../../views/add_schedule_screen.dart';
 import '../../views/driver/trip_history_screen.dart';
+import '../../views/common/notifications_screen.dart';
+
 
 class AppRoutes {
   static const String splash = '/';
@@ -43,6 +45,8 @@ class AppRoutes {
   static const String tripHistory = '/trip_history';
   static const String support = '/support';
   static const String about = '/about';
+  static const String notifications = '/notifications';
+
 
   static Map<String, WidgetBuilder> getRoutes() {
     return {
@@ -64,6 +68,8 @@ class AppRoutes {
       tripHistory: (context) => const TripHistoryScreen(),
       support: (context) => const HelpSupportScreen(),
       about: (context) => const AboutScreen(),
+      notifications: (context) => const NotificationsScreen(),
+
     };
   }
 }

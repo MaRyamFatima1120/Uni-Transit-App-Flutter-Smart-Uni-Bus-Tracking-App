@@ -25,6 +25,19 @@ final userProfileProvider = StreamProvider<Map<String, dynamic>?>((ref) {
       .map((snapshot) => snapshot.data());
 });
 
+final driverDataStreamProvider = StreamProvider<Map<String, dynamic>?>((ref) {
+  final authState = ref.watch(authStateProvider);
+  final user = authState.value;
+
+  if (user == null) return Stream.value(null);
+
+  return FirebaseFirestore.instance
+      .collection('drivers')
+      .doc(user.uid)
+      .snapshots()
+      .map((snapshot) => snapshot.data());
+});
+
 class AuthNotifier extends StateNotifier<AsyncValue<User?>> {
   final AuthService _authService;
 

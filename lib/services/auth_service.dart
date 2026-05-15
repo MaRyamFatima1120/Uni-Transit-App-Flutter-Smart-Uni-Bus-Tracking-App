@@ -63,14 +63,26 @@ class AuthService {
     await _auth.signOut();
   }
 
-  // Get User Role
+  // Get User Role with Fallback
   Future<String?> getUserRole(String uid) async {
     try {
-      DocumentSnapshot doc =
-          await _firestore.collection('users').doc(uid).get();
-      if (doc.exists) {
-        return doc['role'] as String?;
+      // 1. Check primary 'users' collection
+      DocumentSnapshot userDoc = await _firestore.collection('users').doc(uid).get();
+      if (userDoc.exists && userDoc.data() != null) {
+        final data = userDoc.data() as Map<String, dynamic>;
+        if (data.containsKey('role')) {
+          return data['role'] as String?;
+        }
       }
+
+      // 2. Fallback: Check 'drivers' collection
+      DocumentSnapshot driverDoc = await _firestore.collection('drivers').doc(uid).get();
+      if (driverDoc.exists) {
+        AppLogger.info("Role found via drivers collection fallback for UID: $uid");
+        return 'Driver';
+      }
+
+      AppLogger.warning("No role found for UID: $uid in either users or drivers collection");
     } catch (e) {
       AppLogger.error("Error getting user role: $e");
     }

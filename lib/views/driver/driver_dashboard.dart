@@ -13,6 +13,8 @@ import 'package:geolocator/geolocator.dart';
 import 'package:uni_transit/widgets/driver_drawer.dart';
 import 'package:uni_transit/view_models/driver_trip_provider.dart';
 import 'package:uni_transit/view_models/bus_provider.dart';
+import 'package:uni_transit/core/routes/app_routes.dart';
+
 
 class DriverDashboard extends ConsumerStatefulWidget {
   const DriverDashboard({super.key});
@@ -156,6 +158,8 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
           ),
           if (tripState.isTripStarted) Positioned(top: 50, left: 20, right: 20, child: _buildNavigationBanner(tripState)),
           Positioned(top: 40, left: 20, child: Builder(builder: (context) => _buildCircleButton(Icons.menu, () => Scaffold.of(context).openDrawer()))),
+          Positioned(top: 40, right: 20, child: _buildCircleButton(Icons.notifications_outlined, () => Navigator.pushNamed(context, AppRoutes.notifications))),
+
           Positioned(
             right: 20, 
             top: tripState.isTripStarted ? 180 : 100, 

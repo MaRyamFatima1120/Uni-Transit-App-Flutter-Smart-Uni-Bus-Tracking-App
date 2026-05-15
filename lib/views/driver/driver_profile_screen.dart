@@ -10,7 +10,7 @@ class DriverProfileScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final userProfile = ref.watch(userProfileProvider);
+    final driverProfile = ref.watch(driverDataStreamProvider);
     final authState = ref.watch(authStateProvider);
     final user = authState.value;
 
@@ -28,17 +28,19 @@ class DriverProfileScreen extends ConsumerWidget {
         child: SafeArea(
           child: user == null
               ? const Center(child: Text("Not Logged In", style: TextStyle(color: Colors.white)))
-              : userProfile.when(
+              : driverProfile.when(
                   loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
                   error: (err, stack) => Center(child: Text("Error: $err", style: const TextStyle(color: Colors.white))),
                   data: (data) {
                     if (data == null) return const Center(child: Text("No Profile Found", style: TextStyle(color: Colors.white)));
 
                     final name = data['name'] ?? "Driver Name";
-                    final email = user.email ?? "driver@iub.edu.pk";
-                    final busId = data['busNumber'] ?? data['busId'] ?? "Not Assigned";
-                    final plateNo = data['plateNumber'] ?? "N/A";
-                    final profileUrl = data['profileImage'] ?? data['profileImageUrl'] ?? "";
+                    final email = data['email'] ?? user.email ?? "N/A";
+                    final busId = data['assignedBus'] ?? "Not Assigned";
+                    final cnic = data['cnic'] ?? "N/A";
+                    final license = data['licenseNumber'] ?? "N/A";
+                    final experience = data['experience'] ?? "N/A";
+                    final profileUrl = data['profileUrl'] ?? "";
 
                     return SingleChildScrollView(
                       physics: const BouncingScrollPhysics(),
@@ -57,18 +59,13 @@ class DriverProfileScreen extends ConsumerWidget {
                                   value: busId,
                                 ),
                                 _buildInfoTile(
-                                  icon: Icons.credit_card_rounded,
-                                  label: "License Plate Number",
-                                  value: plateNo,
-                                ),
-                                _buildInfoTile(
-                                  icon: Icons.history_rounded,
-                                  label: "Total Trips Completed",
-                                  value: data['totalTrips']?.toString() ?? "0",
+                                  icon: Icons.work_history_rounded,
+                                  label: "Driving Experience",
+                                  value: experience,
                                 ),
                                 
                                 const SizedBox(height: 32),
-                                _buildSectionHeader("PERSONAL INFO"),
+                                _buildSectionHeader("PERSONAL & LEGAL"),
                                 _buildInfoTile(
                                   icon: Icons.email_rounded,
                                   label: "Official Email",
@@ -77,7 +74,17 @@ class DriverProfileScreen extends ConsumerWidget {
                                 _buildInfoTile(
                                   icon: Icons.phone_android_rounded,
                                   label: "Contact Number",
-                                  value: data['phone'] ?? "Not Provided",
+                                  value: data['phoneNumber'] ?? "Not Provided",
+                                ),
+                                _buildInfoTile(
+                                  icon: Icons.badge_rounded,
+                                  label: "CNIC Number",
+                                  value: cnic,
+                                ),
+                                _buildInfoTile(
+                                  icon: Icons.description_rounded,
+                                  label: "License Number",
+                                  value: license,
                                 ),
 
                                 const SizedBox(height: 40),
@@ -137,12 +144,7 @@ class DriverProfileScreen extends ConsumerWidget {
                   letterSpacing: 2,
                 ),
               ),
-              IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(),
-                icon: const Icon(Icons.edit_note_rounded, color: AppColors.primaryYellow, size: 24),
-                onPressed: () => Navigator.pushNamed(context, AppRoutes.completeProfile),
-              ),
+              const SizedBox(width: 24), // Placeholder for alignment
             ],
           ),
           const SizedBox(height: 40),

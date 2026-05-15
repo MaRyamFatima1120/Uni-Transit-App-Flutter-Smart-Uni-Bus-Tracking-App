@@ -77,11 +77,12 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
 
       if (mounted) {
         String routeName = '/login';
-        if (role == 'Student') {
+        final roleLower = role?.toLowerCase();
+        if (roleLower == 'student') {
           routeName = '/student_dashboard';
-        } else if (role == 'Driver') {
+        } else if (roleLower == 'driver') {
           routeName = '/driver_dashboard';
-        } else if (role == 'Admin') {
+        } else if (roleLower == 'admin') {
           routeName = '/admin_dashboard';
         }
         Navigator.pushReplacementNamed(context, routeName);
