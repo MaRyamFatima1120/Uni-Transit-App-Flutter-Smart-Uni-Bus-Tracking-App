@@ -18,7 +18,10 @@ import '../../views/driver/driver_profile_screen.dart';
 
 // Dashboards & Tracking
 import '../../views/driver/driver_dashboard.dart';
+import '../../views/driver/unverified_driver_screen.dart';
+import '../../views/driver/blocked_driver_screen.dart';
 import '../../views/student/student_dashboard.dart';
+import '../../views/student/blocked_student_screen.dart';
 import '../../views/admin/admin_dashboard.dart';
 import '../../views/live_tracking_screen.dart';
 import '../../views/add_schedule_screen.dart';
@@ -39,6 +42,9 @@ class AppRoutes {
   static const String settings = '/settings';
   static const String tracking = '/tracking';
   static const String driverDashboard = '/driver_dashboard';
+  static const String unverifiedDriver = '/unverified_driver';
+  static const String blockedDriver = '/blocked_driver';
+  static const String blockedStudent = '/blocked_student';
   static const String studentDashboard = '/student_dashboard';
   static const String adminDashboard = '/admin_dashboard';
   static const String addSchedule = '/add_schedule';
@@ -62,6 +68,9 @@ class AppRoutes {
       settings: (context) => const SettingsScreen(),
       tracking: (context) => const LiveTrackingScreen(),
       driverDashboard: (context) => const DriverDashboard(),
+      unverifiedDriver: (context) => const UnverifiedDriverScreen(),
+      blockedDriver: (context) => const BlockedDriverScreen(),
+      blockedStudent: (context) => const BlockedStudentScreen(),
       studentDashboard: (context) => const StudentDashboard(),
       adminDashboard: (context) => const AdminDashboard(),
       addSchedule: (context) => const AddScheduleScreen(),

@@ -49,13 +49,13 @@ class _DriverDrawerState extends ConsumerState<DriverDrawer> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final userProfile = ref.watch(userProfileProvider);
+    final userProfile = ref.watch(driverDataStreamProvider);
 
     return Drawer(
       backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
       child: Column(children: [
         userProfile.when(
-          data: (userData) => _buildHeader(userData), 
+          data: (driverData) => _buildHeader(driverData), 
           loading: () => _buildHeader(null, isLoading: true), 
           error: (err, stack) => _buildHeader(null)
         ),
@@ -104,8 +104,8 @@ class _DriverDrawerState extends ConsumerState<DriverDrawer> {
     final authState = ref.watch(authStateProvider);
     final currentUser = authState.value;
     String name = isLoading ? "Loading..." : (userData?['name'] ?? "Driver User");
-    String email = currentUser?.email ?? (isLoading ? "..." : "driver.support@iub.edu.pk");
-    String profileUrl = userData?['profileImage'] ?? userData?['profileImageUrl'] ?? "";
+    String email = userData?['email'] ?? currentUser?.email ?? (isLoading ? "..." : "driver.support@iub.edu.pk");
+    String profileUrl = userData?['profileUrl'] ?? userData?['profileImage'] ?? userData?['profileImageUrl'] ?? "";
 
     return Container(
       width: double.infinity, 
@@ -120,9 +120,20 @@ class _DriverDrawerState extends ConsumerState<DriverDrawer> {
             decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.primaryYellow, width: 2)), 
             child: CircleAvatar(
               radius: 35, 
-              backgroundColor: Colors.white10, 
+              backgroundColor: isLoading ? Colors.white10 : AppColors.primaryYellow.withValues(alpha: 0.2),
               backgroundImage: profileUrl.isNotEmpty ? NetworkImage(profileUrl) : null, 
-              child: profileUrl.isEmpty ? Icon(isLoading ? Icons.hourglass_empty : Icons.person, color: Colors.white, size: 35) : null
+              child: profileUrl.isEmpty
+                  ? isLoading
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text(
+                          name.isNotEmpty ? name.trim()[0].toUpperCase() : 'D',
+                          style: GoogleFonts.poppins(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primaryYellow,
+                          ),
+                        )
+                  : null,
             )
           ),
           if (!isLoading) Container(

@@ -162,71 +162,49 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
 
       markers.add(
         Marker(
-          width: 120,
-          height: 60,
+          width: 140,
+          height: 80,
           point: LatLng(lat, lng),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Beautiful Pill Label
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 10,
-                      spreadRadius: 1,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Text(
-                  name,
-                  style: GoogleFonts.poppins(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade800,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(height: 4),
-              // Premium Dot Pin
-              Container(
-                padding: const EdgeInsets.all(2),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
-                  ],
-                ),
-                child: Container(
-                  width: 14,
-                  height: 14,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Beautiful Pill Label
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    gradient: RadialGradient(
-                      colors: [Colors.grey.shade400, Colors.grey.shade700],
-                    ),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Container(
-                      width: 4,
-                      height: 4,
-                      decoration: const BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange, width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 6,
+                        offset: const Offset(0, 3),
                       ),
+                    ],
+                  ),
+                  child: Text(
+                    name,
+                    style: GoogleFonts.poppins(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange.shade800,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 4),
+                // Premium Dot Pin
+                const Icon(
+                  Icons.radio_button_checked,
+                  color: Colors.orange,
+                  size: 16,
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -315,15 +293,18 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
 
       markers.add(
         Marker(
-          width: 80,
-          height: 80,
+          width: 100,
+          height: 100,
           point: LatLng(lat, lng),
-          child: AnimatedBusMarker(
-            id: id,
-            data: Map<String, dynamic>.from(data),
-            heading: heading,
-            etaInfo: etaInfo,
-            onTap: () => _showBusDetails(id, Map<String, dynamic>.from(data)),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: AnimatedBusMarker(
+              id: id,
+              data: Map<String, dynamic>.from(data),
+              heading: heading,
+              etaInfo: etaInfo,
+              onTap: () => _showBusDetails(id, Map<String, dynamic>.from(data)),
+            ),
           ),
         ),
       );
@@ -422,8 +403,8 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
           ),
           child: Text(
             name.split(' ')[0], // Short name
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: color == AppColors.primaryYellow ? AppColors.primaryNavy : Colors.white,
               fontSize: 10,
               fontWeight: FontWeight.bold,
             ),
@@ -437,9 +418,13 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
             if (!isDestination && color != Colors.grey[400])
               _buildPulseEffect(color),
             Icon(Icons.location_on_rounded, color: color, size: 38),
-            const Positioned(
+            Positioned(
               top: 8,
-              child: Icon(Icons.circle, color: Colors.white, size: 10),
+              child: Icon(
+                Icons.circle,
+                color: color == AppColors.primaryYellow ? AppColors.primaryNavy : Colors.white,
+                size: 10,
+              ),
             ),
           ],
         ),
@@ -576,10 +561,10 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                   polylines: <Polyline>[
                     Polyline(
                       points: routeState.routePoints,
-                      color: AppColors.primaryYellow.withValues(alpha: 0.8),
+                      color: const Color(0xFF1A237E),
                       strokeWidth: 5.0,
                       borderStrokeWidth: 2.0,
-                      borderColor: AppColors.primaryNavy.withValues(alpha: 0.2),
+                      borderColor: const Color(0xFFE8EAF6),
                     ),
                   ],
                 ),
@@ -612,10 +597,10 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                             hubKey.contains(selFrom) || selFrom.contains(hubKey);
 
                         Color markerColor = isDest
-                            ? Colors.redAccent
+                            ? Colors.red
                             : (isStart
-                                ? Colors.greenAccent[700]!
-                                : Colors.grey[400]!);
+                                ? Colors.green
+                                : AppColors.primaryYellow);
 
                         final hubLat = (hub.value['latitude'] as num).toDouble();
                         final hubLng = (hub.value['longitude'] as num).toDouble();
@@ -632,9 +617,12 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
 
                         return Marker(
                           point: markerPos,
-                          width: 80,
-                          height: 100,
-                          child: _buildHubMarker(hub.key, markerColor, isDest),
+                          width: 100,
+                          height: 120,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: _buildHubMarker(hub.key, markerColor, isDest),
+                          ),
                         );
                       }).toList(),
               ),

@@ -6,6 +6,8 @@ class AppColors {
   static const Color primaryYellow = Color(0xFFFFD600); // Fresh Premium Yellow
   static const Color backgroundLight = Color(0xFFFFFFFF);
   static const Color textDark = Color(0xFF1E293B);
+  static const Color textSecondary = Color(0xFF64748B);
+  static const Color borderLight = Color(0xFFE2E8F0);
 
   // Semantic Colors (Bus Types)
   static const Color girlsSpecial = Color(0xFFE91E63); // Modern Pink

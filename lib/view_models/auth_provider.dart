@@ -108,11 +108,11 @@ class AuthNotifier extends StateNotifier<AsyncValue<User?>> {
     String? regNo,
     String? department,
     String? semester,
+    String? phone,
   }) async {
     final user = _authService.currentUser;
-    if (user == null) return;
+    if (user == null) throw Exception("User not authenticated");
     
-    state = const AsyncValue.loading();
     try {
       await _authService.updateProfile(
         uid: user.uid,
@@ -121,10 +121,10 @@ class AuthNotifier extends StateNotifier<AsyncValue<User?>> {
         regNo: regNo,
         department: department,
         semester: semester,
+        phone: phone,
       );
-      state = AsyncValue.data(user);
-    } catch (e, stack) {
-      state = AsyncValue.error(e, stack);
+    } catch (e) {
+      rethrow;
     }
   }
 

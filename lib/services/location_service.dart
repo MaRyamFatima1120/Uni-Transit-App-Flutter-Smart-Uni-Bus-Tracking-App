@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uni_transit/core/util/logger.dart';
 
 class LocationService {
@@ -126,6 +127,13 @@ class LocationService {
       'startTime': ServerValue.timestamp,
       'status': 'active',
     });
+
+    // ⚡ REAL-TIME SYNC: Update Firestore status so Admin Panel sees driver as Online
+    try {
+      await FirebaseFirestore.instance.collection('drivers').doc(uid).update({'status': 'Online'});
+    } catch (e) {
+      AppLogger.warning("Failed to update Firestore status to Online: $e");
+    }
   }
 
   /// Updates the live tracking data for a bus in RTDB.
@@ -168,6 +176,13 @@ class LocationService {
       'endTime': ServerValue.timestamp,
       'status': 'completed',
     });
+
+    // ⚡ REAL-TIME SYNC: Update Firestore status so Admin Panel sees driver as Offline
+    try {
+      await FirebaseFirestore.instance.collection('drivers').doc(uid).update({'status': 'Offline'});
+    } catch (e) {
+      AppLogger.warning("Failed to update Firestore status to Offline: $e");
+    }
 
     // 3. 🧹 CLEANUP: Find any other 'active' trips that might be stuck and close them
     // This prevents "ghost" ongoing trips from appearing in history

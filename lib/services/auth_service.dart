@@ -29,6 +29,9 @@ class AuthService {
         'rollNo': rollNo,
         'regNo': regNo,
         'department': department,
+        'status': 'Active',
+        'isBlocked': false,
+        'isVerified': true,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -50,6 +53,11 @@ class AuthService {
         email: email,
         password: password,
       );
+      // Mark student as Online in Firestore
+      final uid = userCredential.user!.uid;
+      try {
+        await _firestore.collection('users').doc(uid).update({'status': 'Online'});
+      } catch (_) {} // Silently ignore if document doesn't exist yet
       return userCredential;
     } on FirebaseAuthException catch (e) {
       throw e.message ?? "An error occurred during login.";
@@ -60,6 +68,12 @@ class AuthService {
 
   // Sign Out
   Future<void> signOut() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid != null) {
+      try {
+        await _firestore.collection('users').doc(uid).update({'status': 'Offline'});
+      } catch (_) {} // Silently ignore
+    }
     await _auth.signOut();
   }
 
@@ -104,6 +118,7 @@ class AuthService {
     String? regNo,
     String? department,
     String? semester,
+    String? phone,
   }) async {
     final Map<String, dynamic> data = {};
     if (profileImageUrl != null) data['profileImage'] = profileImageUrl;
@@ -111,6 +126,7 @@ class AuthService {
     if (regNo != null) data['regNo'] = regNo;
     if (department != null) data['department'] = department;
     if (semester != null) data['semester'] = semester;
+    if (phone != null) data['phone'] = phone;
 
     if (data.isNotEmpty) {
       await _firestore.collection('users').doc(uid).update(data);

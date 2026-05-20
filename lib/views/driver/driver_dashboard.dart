@@ -14,7 +14,11 @@ import 'package:uni_transit/widgets/driver_drawer.dart';
 import 'package:uni_transit/view_models/driver_trip_provider.dart';
 import 'package:uni_transit/view_models/bus_provider.dart';
 import 'package:uni_transit/core/routes/app_routes.dart';
-
+import 'package:uni_transit/services/sos_service.dart';
+import 'package:uni_transit/services/notification_service.dart';
+import 'package:uni_transit/view_models/auth_provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class DriverDashboard extends ConsumerStatefulWidget {
   const DriverDashboard({super.key});
@@ -32,6 +36,8 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
   late AnimationController _pulseController;
   
   StreamSubscription? _locationSubscription;
+  StreamSubscription<QuerySnapshot>? _notificationSubscription;
+  final DateTime _appStartTime = DateTime.now();
 
   @override
   void initState() {
@@ -41,6 +47,10 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
       duration: const Duration(seconds: 2),
     )..repeat(reverse: true);
 
+    // Mark driver as Online
+    _updateStatus('Online');
+    _listenForPushNotifications();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final user = _authService.currentUser;
       if (user != null) {
@@ -48,6 +58,55 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
       }
       _initLocationTracking();
     });
+  }
+
+  void _listenForPushNotifications() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    _notificationSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('notifications')
+        .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(_appStartTime))
+        .snapshots()
+        .listen((snapshot) {
+      for (var change in snapshot.docChanges) {
+        if (change.type == DocumentChangeType.added) {
+          final data = change.doc.data() as Map<String, dynamic>?;
+          if (data != null) {
+            final title = data['title'] ?? 'New Support Alert';
+            final message = data['message'] ?? '';
+            
+            // Trigger local/push notification
+            NotificationService.showLocalNotification(
+              title: title,
+              body: message,
+            );
+            
+            // Show custom in-app visual snackbar
+            NotificationService.show(
+              title: title,
+              message: message,
+              type: NotificationType.info,
+            );
+          }
+        }
+      }
+    }, onError: (error) {
+      debugPrint("Error listening for user notifications: $error");
+    });
+  }
+
+  Future<void> _updateStatus(String status) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('drivers')
+          .doc(uid)
+          .update({'status': status});
+    } catch (_) {}
   }
 
   Future<void> _initLocationTracking() async {
@@ -71,7 +130,10 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
 
   @override
   void dispose() {
+    // Mark driver as Offline when they leave the dashboard
+    _updateStatus('Offline');
     _locationSubscription?.cancel();
+    _notificationSubscription?.cancel();
     _pulseController.dispose();
     _busNumberController.dispose();
     _plateNumberController.dispose();
@@ -92,8 +154,57 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
     await ref.read(driverTripProvider.notifier).toggleTrip(user.uid, user.displayName ?? "Driver");
   }
 
+  void _handleSOS() async {
+    final user = _authService.currentUser;
+    if (user != null) {
+      final tripState = ref.read(driverTripProvider);
+      await SOSService().sendSOS(
+        userId: user.uid,
+        userName: user.displayName ?? "Driver",
+        lat: tripState.currentLocation.latitude,
+        lng: tripState.currentLocation.longitude,
+        message: "Driver Emergency!",
+      );
+      NotificationService.show(
+        title: "SOS Triggered",
+        message: "Emergency alert sent to university admin.",
+        type: NotificationType.error,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Listen to real-time verification and block status
+    ref.listen<AsyncValue<Map<String, dynamic>?>>(driverDataStreamProvider, (previous, next) {
+      if (next.hasValue) {
+        if (next.value == null) {
+          // Only treat null as "deleted" if the user is still authenticated.
+          // If currentUser is null, it means they simply logged out — not deleted.
+          if (FirebaseAuth.instance.currentUser == null) return;
+          // Account was deleted by admin
+          ref.read(authStateProvider.notifier).logout();
+          Navigator.pushReplacementNamed(context, AppRoutes.login);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Your account has been deleted by the administration.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+
+        final isBlocked = next.value?['isBlocked'] == true || next.value?['isBlocked'] == 'true';
+        final isVerified = next.value?['isVerified'] == true || next.value?['isVerified'] == 'true';
+        
+        if (isBlocked) {
+          Navigator.pushReplacementNamed(context, AppRoutes.blockedDriver);
+        } else if (!isVerified) {
+          Navigator.pushReplacementNamed(context, AppRoutes.unverifiedDriver);
+        }
+      }
+    });
+
     final tripState = ref.watch(driverTripProvider);
 
     if (tripState.isTripStarted && _busNumberController.text.isEmpty) {
@@ -111,19 +222,33 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
             children: [
               TileLayer(urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', subdomains: const ['a', 'b', 'c', 'd']),
               if (tripState.routePoints.isNotEmpty)
-                PolylineLayer(polylines: [Polyline(points: tripState.routePoints, color: AppColors.primaryYellow.withValues(alpha: 0.8), strokeWidth: 7.0)]),
+                PolylineLayer(polylines: [
+                  Polyline(
+                    points: tripState.routePoints,
+                    color: const Color(0xFF1A237E),
+                    strokeWidth: 5.0,
+                    borderStrokeWidth: 2.0,
+                    borderColor: const Color(0xFFE8EAF6),
+                  ),
+                ]),
               if (tripState.isTripStarted && tripState.to != null)
                 MarkerLayer(markers: [
                   Marker(
                     point: _getHubPos(tripState.to!), 
-                    width: 80, height: 100, 
-                    child: _buildHubMarker(tripState.to!, Colors.redAccent, true)
+                    width: 100, height: 120, 
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: _buildHubMarker(tripState.to!, Colors.redAccent, true),
+                    )
                   ),
                   if (tripState.from != null)
                     Marker(
                       point: _getHubPos(tripState.from!), 
-                      width: 80, height: 100, 
-                      child: _buildHubMarker(tripState.from!, Colors.greenAccent[700]!, false)
+                      width: 100, height: 120, 
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: _buildHubMarker(tripState.from!, Colors.greenAccent[700]!, false),
+                      )
                     ),
                 ]),
               MarkerLayer(
@@ -131,9 +256,12 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                   if (tripState.isTripStarted)
                     Marker(
                       point: tripState.currentLocation,
-                      width: 80,
-                      height: 80,
-                      child: _buildBusMarker(tripState.heading),
+                      width: 100,
+                      height: 100,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: _buildBusMarker(tripState.heading),
+                      ),
                     )
                   else
                     // ⚡ FIX: Only show a subtle dot when not "Live Tracking"
@@ -158,13 +286,59 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
           ),
           if (tripState.isTripStarted) Positioned(top: 50, left: 20, right: 20, child: _buildNavigationBanner(tripState)),
           Positioned(top: 40, left: 20, child: Builder(builder: (context) => _buildCircleButton(Icons.menu, () => Scaffold.of(context).openDrawer()))),
-          Positioned(top: 40, right: 20, child: _buildCircleButton(Icons.notifications_outlined, () => Navigator.pushNamed(context, AppRoutes.notifications))),
+          Positioned(
+            top: 40,
+            right: 20,
+            child: StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(FirebaseAuth.instance.currentUser?.uid)
+                  .collection('notifications')
+                  .where('isRead', isEqualTo: false)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                final bool hasUnread = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+                return GestureDetector(
+                  onTap: () => Navigator.pushNamed(context, AppRoutes.notifications),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)],
+                    ),
+                    child: Badge(
+                      isLabelVisible: hasUnread,
+                      backgroundColor: Colors.red,
+                      child: const Icon(
+                        Icons.notifications_outlined,
+                        color: AppColors.primaryNavy,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
 
           Positioned(
             right: 20, 
-            top: tripState.isTripStarted ? 180 : 100, 
+            bottom: MediaQuery.of(context).size.height * (tripState.isTripStarted ? 0.35 : 0.6) + 20, 
             child: Column(
               children: [
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    _buildPulseEffect(Colors.red),
+                    _buildMapControlButton(
+                      icon: Icons.emergency_rounded,
+                      color: Colors.red,
+                      iconColor: Colors.white,
+                      onPressed: _handleSOS,
+                    ),
+                  ],
+                ),
                 _buildMapControlButton(
                   icon: Icons.add_rounded,
                   color: AppColors.primaryNavy,

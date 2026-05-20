@@ -5,6 +5,7 @@ import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/core/constants/app_assets.dart';
 import 'package:uni_transit/core/util/logger.dart';
 import 'package:uni_transit/services/auth_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 
 class SplashScreen extends StatefulWidget {
@@ -79,9 +80,34 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         String routeName = '/login';
         final roleLower = role?.toLowerCase();
         if (roleLower == 'student') {
-          routeName = '/student_dashboard';
+          final studentDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+          bool isBlocked = false;
+          if (studentDoc.exists) {
+            final data = studentDoc.data();
+            isBlocked = data?['isBlocked'] == true || data?['isBlocked'] == 'true';
+          }
+          if (isBlocked) {
+            routeName = '/blocked_student';
+          } else {
+            routeName = '/student_dashboard';
+          }
         } else if (roleLower == 'driver') {
-          routeName = '/driver_dashboard';
+          // Check if driver is verified and blocked
+          final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(user.uid).get();
+          bool isVerified = false;
+          bool isBlocked = false;
+          if (driverDoc.exists) {
+            final data = driverDoc.data();
+            isVerified = data?['isVerified'] == true || data?['isVerified'] == 'true';
+            isBlocked = data?['isBlocked'] == true || data?['isBlocked'] == 'true';
+          }
+          if (isBlocked) {
+            routeName = '/blocked_driver';
+          } else if (isVerified) {
+            routeName = '/driver_dashboard';
+          } else {
+            routeName = '/unverified_driver';
+          }
         } else if (roleLower == 'admin') {
           routeName = '/admin_dashboard';
         }

@@ -1,46 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/models/notification_model.dart';
 import 'package:uni_transit/widgets/custom_app_bar.dart';
 
-class NotificationsScreen extends StatelessWidget {
+class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    // Mock data for now, will be connected to Firestore via Provider later
-    final List<SystemNotificationModel> mockNotifications = [
-      SystemNotificationModel(
-        id: '1',
-        title: 'New Bus Schedule',
-        message: 'The new schedule for Semester Spring 2024 has been uploaded. Please check the schedule tab.',
-        timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-        type: NotificationType.success,
-      ),
-      SystemNotificationModel(
-        id: '2',
-        title: 'Route Delay Alert',
-        message: 'Bus No. 15 on Baghdad to Abbasia route is delayed by 15 minutes due to heavy traffic at Rafi Qamar Road.',
-        timestamp: DateTime.now().subtract(const Duration(hours: 5)),
-        type: NotificationType.alert,
-      ),
-      SystemNotificationModel(
-        id: '3',
-        title: 'Support Ticket Update',
-        message: 'Your query regarding bus seat availability has been resolved. Tap to view the response.',
-        timestamp: DateTime.now().subtract(const Duration(days: 1)),
-        type: NotificationType.support,
-      ),
-      SystemNotificationModel(
-        id: '4',
-        title: 'Weather Warning',
-        message: 'Expect heavy rain today. All buses will follow extra safety protocols. Expect minor delays.',
-        timestamp: DateTime.now().subtract(const Duration(days: 2)),
-        type: NotificationType.warning,
-      ),
-    ];
+  State<NotificationsScreen> createState() => _NotificationsScreenState();
+}
 
+class _NotificationsScreenState extends State<NotificationsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _markNotificationsAsRead();
+  }
+
+  Future<void> _markNotificationsAsRead() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final unreadDocs = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('notifications')
+          .where('isRead', isEqualTo: false)
+          .get();
+
+      if (unreadDocs.docs.isNotEmpty) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (var doc in unreadDocs.docs) {
+          batch.update(doc.reference, {'isRead': true});
+        }
+        await batch.commit();
+      }
+    } catch (e) {
+      debugPrint("Error marking notifications as read: $e");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+    
     return Scaffold(
       backgroundColor: Theme.of(context).brightness == Brightness.dark 
           ? const Color(0xFF0F172A) 
@@ -49,13 +56,39 @@ class NotificationsScreen extends StatelessWidget {
         title: "NOTIFICATIONS",
         showBackArrow: true,
       ),
-      body: mockNotifications.isEmpty
+      body: user == null
           ? _buildEmptyState(context)
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: mockNotifications.length,
-              itemBuilder: (context, index) {
-                return _buildNotificationCard(context, mockNotifications[index]);
+          : StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(user.uid)
+                  .collection('notifications')
+                  .orderBy('timestamp', descending: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snapshot.hasError) {
+                  return Center(child: Text("Error: ${snapshot.error}", style: const TextStyle(color: Colors.red)));
+                }
+                
+                final docs = snapshot.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return _buildEmptyState(context);
+                }
+
+                final notifications = docs
+                    .map((doc) => SystemNotificationModel.fromMap(doc.data() as Map<String, dynamic>, doc.id))
+                    .toList();
+
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: notifications.length,
+                  itemBuilder: (context, index) {
+                    return _buildNotificationCard(context, notifications[index]);
+                  },
+                );
               },
             ),
     );
@@ -85,7 +118,6 @@ class NotificationsScreen extends StatelessWidget {
         child: IntrinsicHeight(
           child: Row(
             children: [
-              // Color strip indicating type
               Container(
                 width: 6,
                 color: notification.color,
