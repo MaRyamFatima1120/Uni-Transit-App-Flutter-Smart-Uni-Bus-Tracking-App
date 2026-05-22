@@ -19,6 +19,7 @@ import 'package:uni_transit/view_models/auth_provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uni_transit/views/common/sos_review_bottom_sheet.dart';
+import 'package:uni_transit/views/driver/assigned_routes_screen.dart';
 
 class DriverDashboard extends ConsumerStatefulWidget {
   const DriverDashboard({super.key});
@@ -273,6 +274,9 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
 
     // Listen to trip state changes (e.g. from assigned routes screen selection)
     ref.listen<DriverTripState>(driverTripProvider, (previous, next) {
+      debugPrint("DriverDashboard: driverTripProvider state updated. "
+          "Previous state: busNumber='${previous?.busNumber}', from='${previous?.from}', to='${previous?.to}'. "
+          "Next state: busNumber='${next.busNumber}', from='${next.from}', to='${next.to}', isTripStarted=${next.isTripStarted}");
       if (previous == null || previous.busNumber != next.busNumber) {
         _busNumberController.text = next.busNumber;
       }
@@ -283,226 +287,291 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
 
     final tripState = ref.watch(driverTripProvider);
 
+    debugPrint("DriverDashboard: building with tripState: "
+        "isTripStarted=${tripState.isTripStarted}, "
+        "busNumber='${tripState.busNumber}', "
+        "plateNumber='${tripState.plateNumber}', "
+        "from='${tripState.from}', "
+        "to='${tripState.to}', "
+        "isLoading=${tripState.isLoading}");
+
+    // Guard: If state is loading, return a loading indicator instead of building layout.
+    if (tripState.isLoading) {
+      return const Scaffold(
+        backgroundColor: Colors.white,
+        body: Center(
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryNavy),
+          ),
+        ),
+      );
+    }
+
     if (tripState.isTripStarted && _busNumberController.text.isEmpty) {
       _busNumberController.text = tripState.busNumber;
       _plateNumberController.text = tripState.plateNumber;
     }
 
-    return Scaffold(
-      drawer: const DriverDrawer(),
-      body: Stack(
-        children: [
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(initialCenter: tripState.currentLocation, initialZoom: 15),
-            children: [
-              TileLayer(urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', subdomains: const ['a', 'b', 'c', 'd']),
-              if (tripState.routePoints.isNotEmpty)
-                PolylineLayer(polylines: [
-                  Polyline(
-                    points: tripState.routePoints,
-                    color: const Color(0xFF1A237E),
-                    strokeWidth: 5.0,
-                    borderStrokeWidth: 2.0,
-                    borderColor: const Color(0xFFE8EAF6),
-                  ),
-                ]),
-              if (tripState.isTripStarted && tripState.to != null)
-                MarkerLayer(markers: [
-                  Marker(
-                    point: _getHubPos(tripState.to!), 
-                    width: 100, height: 120, 
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      child: _buildHubMarker(tripState.to!, Colors.redAccent, true),
-                    )
-                  ),
-                  if (tripState.from != null)
+    try {
+      return Scaffold(
+        drawer: const DriverDrawer(),
+        body: Stack(
+          children: [
+            FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(initialCenter: tripState.currentLocation, initialZoom: 15),
+              children: [
+                TileLayer(urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', subdomains: const ['a', 'b', 'c', 'd']),
+                if (tripState.routePoints.isNotEmpty)
+                  PolylineLayer(polylines: [
+                    Polyline(
+                      points: tripState.routePoints,
+                      color: const Color(0xFF1A237E),
+                      strokeWidth: 5.0,
+                      borderStrokeWidth: 2.0,
+                      borderColor: const Color(0xFFE8EAF6),
+                    ),
+                  ]),
+                if (tripState.isTripStarted && tripState.to != null)
+                  MarkerLayer(markers: [
                     Marker(
-                      point: _getHubPos(tripState.from!), 
+                      point: _getHubPos(tripState.to!), 
                       width: 100, height: 120, 
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
-                        child: _buildHubMarker(tripState.from!, Colors.greenAccent[700]!, false),
+                        child: _buildHubMarker(tripState.to!, Colors.redAccent, true),
                       )
                     ),
-                ]),
-              MarkerLayer(
-                markers: [
-                  if (tripState.isTripStarted)
-                    Marker(
-                      point: tripState.currentLocation,
-                      width: 100,
-                      height: 100,
-                      child: FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: _buildBusMarker(tripState.heading),
+                    if (tripState.from != null)
+                      Marker(
+                        point: _getHubPos(tripState.from!), 
+                        width: 100, height: 120, 
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: _buildHubMarker(tripState.from!, Colors.greenAccent[700]!, false),
+                        )
                       ),
-                    )
-                  else
-                    // ⚡ FIX: Only show a subtle dot when not "Live Tracking"
-                    Marker(
-                      point: tripState.currentLocation,
-                      width: 20,
-                      height: 20,
-                      child: Container(
-                        decoration: BoxDecoration(
+                  ]),
+                MarkerLayer(
+                  markers: [
+                    if (tripState.isTripStarted)
+                      Marker(
+                        point: tripState.currentLocation,
+                        width: 100,
+                        height: 100,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: _buildBusMarker(tripState.heading),
+                        ),
+                      )
+                    else
+                      // ⚡ FIX: Only show a subtle dot when not "Live Tracking"
+                      Marker(
+                        point: tripState.currentLocation,
+                        width: 20,
+                        height: 20,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryNavy,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 3),
+                            boxShadow: const [
+                              BoxShadow(color: Colors.black26, blurRadius: 10),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+            if (tripState.isTripStarted) Positioned(top: 50, left: 20, right: 20, child: _buildNavigationBanner(tripState)),
+            Positioned(top: 40, left: 20, child: Builder(builder: (context) => _buildCircleButton(Icons.menu, () => Scaffold.of(context).openDrawer()))),
+            Positioned(
+              top: 40,
+              right: 20,
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(FirebaseAuth.instance.currentUser?.uid)
+                    .collection('notifications')
+                    .where('isRead', isEqualTo: false)
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  final bool hasUnread = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
+                  return GestureDetector(
+                    onTap: () => Navigator.pushNamed(context, AppRoutes.notifications),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)],
+                      ),
+                      child: Badge(
+                        isLabelVisible: hasUnread,
+                        backgroundColor: Colors.red,
+                        child: const Icon(
+                          Icons.notifications_outlined,
                           color: AppColors.primaryNavy,
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: const [
-                            BoxShadow(color: Colors.black26, blurRadius: 10),
-                          ],
+                          size: 24,
                         ),
                       ),
                     ),
+                  );
+                },
+              ),
+            ),
+
+            Positioned(
+              right: 20, 
+              bottom: MediaQuery.of(context).size.height * (tripState.isTripStarted ? 0.35 : 0.6) + 20, 
+              child: Column(
+                children: [
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      _buildPulseEffect(Colors.red),
+                      _buildMapControlButton(
+                        icon: Icons.emergency_rounded,
+                        color: Colors.red,
+                        iconColor: Colors.white,
+                        onPressed: _handleSOS,
+                      ),
+                    ],
+                  ),
+                  _buildMapControlButton(
+                    icon: Icons.add_rounded,
+                    color: AppColors.primaryNavy,
+                    iconColor: Colors.white,
+                    onPressed: () {
+                      final currentZoom = _mapController.camera.zoom;
+                      _mapController.move(_mapController.camera.center, currentZoom + 1);
+                    },
+                  ),
+                  _buildMapControlButton(
+                    icon: Icons.remove_rounded,
+                    color: AppColors.primaryNavy,
+                    iconColor: Colors.white,
+                    onPressed: () {
+                      final currentZoom = _mapController.camera.zoom;
+                      _mapController.move(_mapController.camera.center, currentZoom - 1);
+                    },
+                  ),
+                  _buildMapControlButton(
+                    icon: Icons.my_location_rounded, 
+                    color: AppColors.primaryYellow,
+                    onPressed: () => _mapController.move(tripState.currentLocation, 15),
+                  ),
                 ],
               ),
-            ],
-          ),
-          if (tripState.isTripStarted) Positioned(top: 50, left: 20, right: 20, child: _buildNavigationBanner(tripState)),
-          Positioned(top: 40, left: 20, child: Builder(builder: (context) => _buildCircleButton(Icons.menu, () => Scaffold.of(context).openDrawer()))),
-          Positioned(
-            top: 40,
-            right: 20,
-            child: StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('users')
-                  .doc(FirebaseAuth.instance.currentUser?.uid)
-                  .collection('notifications')
-                  .where('isRead', isEqualTo: false)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                final bool hasUnread = snapshot.hasData && snapshot.data!.docs.isNotEmpty;
-                return GestureDetector(
-                  onTap: () => Navigator.pushNamed(context, AppRoutes.notifications),
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10)],
-                    ),
-                    child: Badge(
-                      isLabelVisible: hasUnread,
-                      backgroundColor: Colors.red,
-                      child: const Icon(
-                        Icons.notifications_outlined,
-                        color: AppColors.primaryNavy,
-                        size: 24,
-                      ),
+            ),
+
+            // ⚡ PROFESSIONAL: Draggable Bottom Sheet
+            DraggableScrollableSheet(
+              initialChildSize: tripState.isTripStarted ? 0.35 : 0.6,
+              minChildSize: 0.15,
+              maxChildSize: 0.85,
+              builder: (context, scrollController) {
+                return Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 20)],
+                  ),
+                  child: SingleChildScrollView(
+                    controller: scrollController,
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Handle
+                        Container(
+                          width: 40, 
+                          height: 5, 
+                          decoration: BoxDecoration(
+                            color: Colors.grey[300], 
+                            borderRadius: BorderRadius.circular(10)
+                          )
+                        ),
+                        const SizedBox(height: 16),
+                        
+                        if (!tripState.isTripStarted) 
+                          _buildConfigUI(tripState) 
+                        else 
+                          _buildActiveTripStatus(tripState),
+                        
+                        const SizedBox(height: 24),
+                        
+                        SizedBox(
+                          width: double.infinity, 
+                          height: 56,
+                          child: ElevatedButton(
+                            onPressed: _onToggle,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: tripState.isTripStarted ? Colors.red : AppColors.primaryNavy, 
+                              foregroundColor: Colors.white, 
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
+                            ),
+                            child: Text(
+                              tripState.isTripStarted ? "TERMINATE TRIP" : "COMMENCE TRACKING", 
+                              style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 );
               },
             ),
-          ),
-
-          Positioned(
-            right: 20, 
-            bottom: MediaQuery.of(context).size.height * (tripState.isTripStarted ? 0.35 : 0.6) + 20, 
+          ],
+        ),
+      );
+    } catch (e, stack) {
+      debugPrint("CRITICAL: DriverDashboard build error captured: $e\n$stack");
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
             child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    _buildPulseEffect(Colors.red),
-                    _buildMapControlButton(
-                      icon: Icons.emergency_rounded,
-                      color: Colors.red,
-                      iconColor: Colors.white,
-                      onPressed: _handleSOS,
-                    ),
-                  ],
+                const Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 64),
+                const SizedBox(height: 16),
+                Text(
+                  "Unable to render Dashboard",
+                  style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
                 ),
-                _buildMapControlButton(
-                  icon: Icons.add_rounded,
-                  color: AppColors.primaryNavy,
-                  iconColor: Colors.white,
+                const SizedBox(height: 8),
+                Text(
+                  "An unexpected error occurred: $e\n\nPlease try resetting your selected route or contact administration.",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
                   onPressed: () {
-                    final currentZoom = _mapController.camera.zoom;
-                    _mapController.move(_mapController.camera.center, currentZoom + 1);
+                    ref.read(driverTripProvider.notifier).updateInputs(
+                      bus: "",
+                      plate: "",
+                      from: null,
+                      to: null,
+                    );
                   },
-                ),
-                _buildMapControlButton(
-                  icon: Icons.remove_rounded,
-                  color: AppColors.primaryNavy,
-                  iconColor: Colors.white,
-                  onPressed: () {
-                    final currentZoom = _mapController.camera.zoom;
-                    _mapController.move(_mapController.camera.center, currentZoom - 1);
-                  },
-                ),
-                _buildMapControlButton(
-                  icon: Icons.my_location_rounded, 
-                  color: AppColors.primaryYellow,
-                  onPressed: () => _mapController.move(tripState.currentLocation, 15),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryNavy,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text("Reset Assignment State"),
                 ),
               ],
             ),
           ),
-
-          // ⚡ PROFESSIONAL: Draggable Bottom Sheet
-          DraggableScrollableSheet(
-            initialChildSize: tripState.isTripStarted ? 0.35 : 0.6,
-            minChildSize: 0.15,
-            maxChildSize: 0.85,
-            builder: (context, scrollController) {
-              return Container(
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-                  boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 20)],
-                ),
-                child: SingleChildScrollView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Handle
-                      Container(
-                        width: 40, 
-                        height: 5, 
-                        decoration: BoxDecoration(
-                          color: Colors.grey[300], 
-                          borderRadius: BorderRadius.circular(10)
-                        )
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      if (!tripState.isTripStarted) 
-                        _buildConfigUI(tripState) 
-                      else 
-                        _buildActiveTripStatus(tripState),
-                      
-                      const SizedBox(height: 24),
-                      
-                      SizedBox(
-                        width: double.infinity, 
-                        height: 56,
-                        child: ElevatedButton(
-                          onPressed: _onToggle,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: tripState.isTripStarted ? Colors.red : AppColors.primaryNavy, 
-                            foregroundColor: Colors.white, 
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
-                          ),
-                          child: Text(
-                            tripState.isTripStarted ? "TERMINATE TRIP" : "COMMENCE TRACKING", 
-                            style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
+        ),
+      );
+    }
   }
 
   LatLng _getHubPos(String name) {
@@ -656,19 +725,141 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
   }
 
   Widget _buildConfigUI(DriverTripState state) {
-    return Column(children: [
-        Text("READY TO DEPART", style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryNavy, letterSpacing: 1.5)),
-        const SizedBox(height: 16),
-        TextField(controller: _busNumberController, decoration: InputDecoration(hintText: "Bus ID", prefixIcon: const Icon(Icons.numbers, size: 20), filled: true, fillColor: Colors.grey[50], border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none))),
+    final bool hasSelectedRoute = state.from != null && state.to != null && state.busNumber.isNotEmpty;
+
+    if (!hasSelectedRoute) {
+      return Column(
+        children: [
+          Icon(Icons.route_rounded, size: 48, color: AppColors.primaryNavy.withOpacity(0.3)),
+          const SizedBox(height: 12),
+          Text(
+            "NO ACTIVE ROUTE SELECTED",
+            style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Please select one of your assigned routes for today to commence tracking.",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[500]),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AssignedRoutesScreen()),
+                );
+              },
+              icon: const Icon(Icons.calendar_month_rounded, size: 18),
+              label: Text(
+                "SELECT ASSIGNED ROUTE",
+                style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primaryNavy,
+                side: const BorderSide(color: AppColors.primaryNavy),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              "SELECTED ASSIGNMENT",
+              style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.primaryNavy, letterSpacing: 1),
+            ),
+            TextButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AssignedRoutesScreen()),
+                );
+              },
+              icon: const Icon(Icons.edit, size: 14),
+              label: const Text("Change Route", style: TextStyle(fontSize: 11)),
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.primaryNavy,
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 12),
-        TextField(controller: _plateNumberController, decoration: InputDecoration(hintText: "Plate Number", prefixIcon: const Icon(Icons.credit_card, size: 20), filled: true, fillColor: Colors.grey[50], border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none))),
-        const SizedBox(height: 16),
-        _buildGenderSelector(state),
-        const SizedBox(height: 16),
-        _buildRoutePicker("Beginning Hub", state.from, (v) => ref.read(driverTripProvider.notifier).updateInputs(from: v)),
-        const SizedBox(height: 12),
-        _buildRoutePicker("Destination Hub", state.to, (v) => ref.read(driverTripProvider.notifier).updateInputs(to: v)),
-    ]);
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.directions_bus_rounded, color: AppColors.primaryNavy, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("BUS NUMBER", style: TextStyle(fontSize: 8, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text(
+                          state.busNumber,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.primaryNavy),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryYellow.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      state.gender.toUpperCase(),
+                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 20),
+              Row(
+                children: [
+                  const Icon(Icons.route, color: AppColors.primaryNavy, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text("ROUTE DIRECTION", style: TextStyle(fontSize: 8, color: Colors.grey, fontWeight: FontWeight.bold)),
+                        Text(
+                          "${state.from} ➔ ${state.to}",
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.primaryNavy),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 
   Widget _buildGenderSelector(DriverTripState state) {

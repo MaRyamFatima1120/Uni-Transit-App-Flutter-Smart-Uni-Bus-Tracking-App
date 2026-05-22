@@ -63,62 +63,83 @@ class MyApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    _precacheImages(context);
-    
     final appInfoAsync = ref.watch(appInfoProvider);
     final themeMode = ref.watch(themeProvider);
-    return appInfoAsync.when(
-      data: (appInfo) => MaterialApp(
-        title: appInfo.appName,
-        debugShowCheckedModeBanner: false,
-        scaffoldMessengerKey: NotificationService.messengerKey,
-        themeMode: themeMode,
-        theme: AppTheme.createTheme(
-          primaryHex: appInfo.primaryColor,
-          accentHex: appInfo.accentColor,
-          backgroundHex: appInfo.backgroundColor,
-          cardHex: appInfo.cardColor,
-          textPrimaryHex: appInfo.textPrimaryColor,
-          textSecondaryHex: appInfo.textSecondaryColor,
+
+    // Fallbacks while app information is loading
+    ThemeData theme = AppTheme.lightTheme;
+    ThemeData darkTheme = AppTheme.lightTheme;
+    String title = 'Uni-Transit';
+
+    if (appInfoAsync.hasValue) {
+      final appInfo = appInfoAsync.value!;
+      title = appInfo.appName;
+      theme = AppTheme.createTheme(
+        primaryHex: appInfo.primaryColor,
+        accentHex: appInfo.accentColor,
+        backgroundHex: appInfo.backgroundColor,
+        cardHex: appInfo.cardColor,
+        textPrimaryHex: appInfo.textPrimaryColor,
+        textSecondaryHex: appInfo.textSecondaryColor,
+      );
+      darkTheme = AppTheme.createTheme(
+        primaryHex: appInfo.primaryColor,
+        accentHex: appInfo.accentColor,
+        backgroundHex: appInfo.backgroundColor,
+        cardHex: appInfo.cardColor,
+        textPrimaryHex: appInfo.textPrimaryColor,
+        textSecondaryHex: appInfo.textSecondaryColor,
+        isDark: true,
+      );
+    }
+
+    final routes = AppRoutes.getRoutes()..remove(AppRoutes.splash);
+
+    return MaterialApp(
+      title: title,
+      debugShowCheckedModeBanner: false,
+      scaffoldMessengerKey: NotificationService.messengerKey,
+      themeMode: themeMode,
+      theme: theme,
+      darkTheme: darkTheme,
+      home: appInfoAsync.when(
+        data: (appInfo) => Builder(
+          builder: (context) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _precacheImages(context);
+            });
+            return const SplashScreen();
+          },
         ),
-        darkTheme: AppTheme.createTheme(
-          primaryHex: appInfo.primaryColor,
-          accentHex: appInfo.accentColor,
-          backgroundHex: appInfo.backgroundColor,
-          cardHex: appInfo.cardColor,
-          textPrimaryHex: appInfo.textPrimaryColor,
-          textSecondaryHex: appInfo.textSecondaryColor,
-          isDark: true,
+        loading: () => const Scaffold(
+          body: Center(
+            child: CircularProgressIndicator(),
+          ),
         ),
-        home: const SplashScreen(),
-        routes: AppRoutes.getRoutes()..remove(AppRoutes.splash),
-      ),
-      loading: () => const MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: Scaffold(body: Center(child: CircularProgressIndicator())),
-      ),
-      error: (e, stack) {
-        debugPrint("CRITICAL APP ERROR: $e\n$stack");
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.lightTheme,
-          home: Scaffold(
+        error: (e, stack) {
+          debugPrint("CRITICAL APP ERROR: $e\n$stack");
+          return Scaffold(
             body: Center(
               child: Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Text("App Load Error: $e", textAlign: TextAlign.center),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
+      routes: routes,
     );
   }
 
   void _precacheImages(BuildContext context) {
-    precacheImage(const AssetImage('assets/images/IUBLogo.png'), context);
-    precacheImage(const AssetImage('assets/images/tracking.png'), context);
-    precacheImage(const AssetImage('assets/images/schedule.png'), context);
-    precacheImage(const AssetImage('assets/images/safety.png'), context);
+    try {
+      precacheImage(const AssetImage('assets/images/IUBLogo.png'), context);
+      precacheImage(const AssetImage('assets/images/tracking.png'), context);
+      precacheImage(const AssetImage('assets/images/schedule.png'), context);
+      precacheImage(const AssetImage('assets/images/safety.png'), context);
+    } catch (e) {
+      debugPrint("Precache images failed: $e");
+    }
   }
 }

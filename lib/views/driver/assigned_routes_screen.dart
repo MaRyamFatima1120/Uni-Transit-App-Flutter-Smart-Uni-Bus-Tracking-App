@@ -10,8 +10,84 @@ import 'package:uni_transit/view_models/driver_trip_provider.dart';
 import 'package:uni_transit/models/bus_schedule.dart';
 import 'package:uni_transit/services/schedule_service.dart';
 
-class AssignedRoutesScreen extends ConsumerWidget {
+class AssignedRoutesScreen extends ConsumerStatefulWidget {
   const AssignedRoutesScreen({super.key});
+
+  @override
+  ConsumerState<AssignedRoutesScreen> createState() => _AssignedRoutesScreenState();
+}
+
+class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
+  late DateTime _selectedDate;
+  late DateTime _currentMonth;
+  late ScrollController _calendarScrollController;
+
+  final List<String> _weekdays = [
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedDate = DateTime.now();
+    _currentMonth = DateTime(_selectedDate.year, _selectedDate.month);
+    _calendarScrollController = ScrollController();
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelectedDate());
+  }
+
+  @override
+  void dispose() {
+    _calendarScrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToSelectedDate() {
+    if (_calendarScrollController.hasClients) {
+      final index = _selectedDate.day - 1;
+      _calendarScrollController.animateTo(
+        index * 62.0, // Width of date cell (54) + margin (8)
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  List<DateTime> _generateDaysInMonth(DateTime month) {
+    final lastDayOfMonth = DateTime(month.year, month.month + 1, 0);
+    return List.generate(
+      lastDayOfMonth.day,
+      (index) => DateTime(month.year, month.month, index + 1),
+    );
+  }
+
+  String _getMonthName(DateTime date) {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return months[date.month - 1];
+  }
+
+  String _getWeekdayName(DateTime date) {
+    return _weekdays[date.weekday - 1];
+  }
+
+  String _formatDate(DateTime date) {
+    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+  }
+
+  void _changeMonth(int offset) {
+    setState(() {
+      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + offset);
+      if (_currentMonth.year == DateTime.now().year && _currentMonth.month == DateTime.now().month) {
+        _selectedDate = DateTime.now();
+      } else {
+        _selectedDate = DateTime(_currentMonth.year, _currentMonth.month, 1);
+      }
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToSelectedDate());
+  }
 
   LatLng _getCampusCoord(String campusName) {
     final nameLower = campusName.toLowerCase();
@@ -20,9 +96,9 @@ class AssignedRoutesScreen extends ConsumerWidget {
     } else if (nameLower.contains('abbasia') || nameLower.contains('old')) {
       return CampusLocations.abbasiaCampus;
     } else if (nameLower.contains('railway')) {
-      return const LatLng(29.3970, 71.6850); // Railway Campus default coordinates
+      return const LatLng(29.3970, 71.6850);
     }
-    return CampusLocations.baghdadCampus; // Fallback
+    return CampusLocations.baghdadCampus;
   }
 
   Map<String, dynamic> _parseRouteDetails(String? routeString) {
@@ -67,7 +143,9 @@ class AssignedRoutesScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
+    final days = _generateDaysInMonth(_currentMonth);
+    
     try {
       final driverProfileAsync = ref.watch(driverDataStreamProvider);
       final tripState = ref.watch(driverTripProvider);
@@ -129,7 +207,21 @@ class AssignedRoutesScreen extends ConsumerWidget {
                       );
                     }
 
-                    final assignedRoutes = matchingSchedules.map((schedule) {
+                    final selectedDateStr = _formatDate(_selectedDate);
+                    final selectedDayName = _getWeekdayName(_selectedDate);
+
+                    final filteredSchedules = matchingSchedules.where((schedule) {
+                      if (schedule.date != null && schedule.date!.isNotEmpty) {
+                        return schedule.date == selectedDateStr;
+                      }
+                      if (schedule.operatingDays != null && schedule.operatingDays!.isNotEmpty) {
+                        return schedule.operatingDays!.contains(selectedDayName);
+                      }
+                      // Default Daily schedules do not run on weekends
+                      return selectedDayName != 'Saturday' && selectedDayName != 'Sunday';
+                    }).toList();
+
+                    final assignedRoutes = filteredSchedules.map((schedule) {
                       final parsed = _parseRouteDetails(schedule.route);
                       final type = schedule.type ?? 'Combined';
                       String mappedGender = "Combined";
@@ -158,15 +250,177 @@ class AssignedRoutesScreen extends ConsumerWidget {
                       physics: const BouncingScrollPhysics(),
                       slivers: [
                         _buildSliverAppBar(context, assignedRoutes.length, assignedBus),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
-                          sliver: SliverList(
-                            delegate: SliverChildBuilderDelegate(
-                              (context, index) => _buildProfessionalRouteCard(context, ref, assignedRoutes[index]),
-                              childCount: assignedRoutes.length,
+                        
+                        // Date picker section
+                        SliverToBoxAdapter(
+                          child: Container(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.02),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              children: [
+                                // Month Navigation Row
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.calendar_month_rounded, color: AppColors.primaryNavy, size: 20),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          '${_getMonthName(_currentMonth)} ${_currentMonth.year}',
+                                          style: GoogleFonts.poppins(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.bold,
+                                            color: AppColors.textDark,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    Row(
+                                      children: [
+                                        IconButton(
+                                          onPressed: () => _changeMonth(-1),
+                                          icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                                          constraints: const BoxConstraints(),
+                                          padding: const EdgeInsets.all(4),
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: Colors.grey[100],
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        IconButton(
+                                          onPressed: () => _changeMonth(1),
+                                          icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                                          constraints: const BoxConstraints(),
+                                          padding: const EdgeInsets.all(4),
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: Colors.grey[100],
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                
+                                // Horizontal calendar list
+                                SizedBox(
+                                  height: 72,
+                                  child: ListView.builder(
+                                    controller: _calendarScrollController,
+                                    scrollDirection: Axis.horizontal,
+                                    itemCount: days.length,
+                                    itemBuilder: (context, index) {
+                                      final date = days[index];
+                                      final isSelected = date.year == _selectedDate.year &&
+                                          date.month == _selectedDate.month &&
+                                          date.day == _selectedDate.day;
+                                      final isToday = date.year == DateTime.now().year &&
+                                          date.month == DateTime.now().month &&
+                                          date.day == DateTime.now().day;
+                                      final dayOfWeek = _getWeekdayName(date).substring(0, 3);
+
+                                      return GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            _selectedDate = date;
+                                          });
+                                        },
+                                        child: Container(
+                                          width: 54,
+                                          margin: const EdgeInsets.only(right: 8),
+                                          decoration: BoxDecoration(
+                                            gradient: isSelected
+                                                ? const LinearGradient(
+                                                    colors: [AppColors.primaryNavy, Color(0xFF424F9A)],
+                                                    begin: Alignment.topLeft,
+                                                    end: Alignment.bottomRight,
+                                                  )
+                                                : null,
+                                            color: isSelected ? null : (isToday ? AppColors.primaryNavy.withValues(alpha: 0.05) : Colors.transparent),
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(
+                                              color: isSelected
+                                                  ? Colors.transparent
+                                                  : (isToday ? AppColors.primaryNavy.withValues(alpha: 0.3) : Colors.grey[200]!),
+                                              width: isToday ? 1.5 : 1,
+                                            ),
+                                          ),
+                                          child: Column(
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Text(
+                                                dayOfWeek.toUpperCase(),
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 9,
+                                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                                  color: isSelected ? Colors.white.withOpacity(0.8) : AppColors.textSecondary,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                date.day.toString(),
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isSelected ? Colors.white : AppColors.textDark,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
+
+                        // Date Text Indicator
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                            child: Row(
+                              children: [
+                                Text(
+                                  '${_getWeekdayName(_selectedDate)}, ${_selectedDate.day} ${_getMonthName(_selectedDate).substring(0, 3)}',
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: AppColors.primaryNavy,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // Empty State vs Route list
+                        if (assignedRoutes.isEmpty)
+                          _buildSliverEmptyState()
+                        else
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) => _buildProfessionalRouteCard(context, assignedRoutes[index]),
+                                childCount: assignedRoutes.length,
+                              ),
+                            ),
+                          ),
                       ],
                     );
                   } catch (e, stack) {
@@ -188,6 +442,32 @@ class AssignedRoutesScreen extends ConsumerWidget {
       debugPrint("AssignedRoutesScreen: Main build error: $e\n$stack");
       return _buildErrorState(context, "Internal Layout Error: $e");
     }
+  }
+
+  Widget _buildSliverEmptyState() {
+    return SliverFillRemaining(
+      hasScrollBody: false,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 60.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.calendar_month_outlined, size: 60, color: Colors.grey[300]),
+              const SizedBox(height: 16),
+              Text(
+                "No assigned routes for this date",
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[500],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildSliverAppBar(BuildContext context, int count, String busNum) {
@@ -393,7 +673,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildProfessionalRouteCard(BuildContext context, WidgetRef ref, Map<String, dynamic> route) {
+  Widget _buildProfessionalRouteCard(BuildContext context, Map<String, dynamic> route) {
     bool isActive = route['isActive'];
     final fromCoord = route['fromCoord'] as LatLng;
     final toCoord = route['toCoord'] as LatLng;
@@ -633,20 +913,28 @@ class AssignedRoutesScreen extends ConsumerWidget {
                       ),
                       ElevatedButton(
                         onPressed: () {
-                          // Pre-fill trip selection and go back to dashboard
-                          ref.read(driverTripProvider.notifier).updateInputs(
-                            from: route['from'],
-                            to: route['to'],
-                            bus: route['busId'],
-                            gender: route['gender'],
-                          );
-                          Navigator.pop(context);
+                          // Show SnackBar first while context is active
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text("Selected Route: ${route['from']} ➔ ${route['to']}"),
                               backgroundColor: AppColors.primaryNavy,
                             ),
                           );
+
+                          // Pre-fill trip selection in driverTripProvider
+                          ref.read(driverTripProvider.notifier).updateInputs(
+                            from: route['from'],
+                            to: route['to'],
+                            bus: route['busId'],
+                            gender: route['gender'],
+                          );
+
+                          // Safely synchronize navigation pop with provider updates using post frame callback
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (context.mounted) {
+                              Navigator.pop(context);
+                            }
+                          });
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isActive ? Colors.green.shade500 : AppColors.primaryNavy,
