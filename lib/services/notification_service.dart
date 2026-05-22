@@ -118,7 +118,6 @@ class NotificationService {
     );
   }
 
-  /// Shows a professional system-level notification (Works in foreground/background).
   static Future<void> showLocalNotification({
     required String title,
     required String body,
@@ -131,12 +130,21 @@ class NotificationService {
           channelDescription: 'Notifications for new trips and bus movements',
           importance: Importance.max,
           priority: Priority.high,
+          playSound: true,
           showWhen: true,
           color: Color(0xFF0A1D56), // primaryNavy
         );
 
+    const DarwinNotificationDetails iosPlatformChannelSpecifics =
+        DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        );
+
     const NotificationDetails platformChannelSpecifics = NotificationDetails(
       android: androidPlatformChannelSpecifics,
+      iOS: iosPlatformChannelSpecifics,
     );
 
     await _localNotifications.show(id, title, body, platformChannelSpecifics);

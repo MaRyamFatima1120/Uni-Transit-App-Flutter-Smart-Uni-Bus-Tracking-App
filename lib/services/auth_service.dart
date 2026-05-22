@@ -29,6 +29,9 @@ class AuthService {
         'rollNo': rollNo,
         'regNo': regNo,
         'department': department,
+        'status': 'Active',
+        'isBlocked': false,
+        'isVerified': true,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -50,6 +53,11 @@ class AuthService {
         email: email,
         password: password,
       );
+      // Mark student as Online in Firestore
+      final uid = userCredential.user!.uid;
+      try {
+        await _firestore.collection('users').doc(uid).update({'status': 'Online'});
+      } catch (_) {} // Silently ignore if document doesn't exist yet
       return userCredential;
     } on FirebaseAuthException catch (e) {
       throw e.message ?? "An error occurred during login.";
@@ -60,17 +68,35 @@ class AuthService {
 
   // Sign Out
   Future<void> signOut() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid != null) {
+      try {
+        await _firestore.collection('users').doc(uid).update({'status': 'Offline'});
+      } catch (_) {} // Silently ignore
+    }
     await _auth.signOut();
   }
 
-  // Get User Role
+  // Get User Role with Fallback
   Future<String?> getUserRole(String uid) async {
     try {
-      DocumentSnapshot doc =
-          await _firestore.collection('users').doc(uid).get();
-      if (doc.exists) {
-        return doc['role'] as String?;
+      // 1. Check primary 'users' collection
+      DocumentSnapshot userDoc = await _firestore.collection('users').doc(uid).get();
+      if (userDoc.exists && userDoc.data() != null) {
+        final data = userDoc.data() as Map<String, dynamic>;
+        if (data.containsKey('role')) {
+          return data['role'] as String?;
+        }
       }
+
+      // 2. Fallback: Check 'drivers' collection
+      DocumentSnapshot driverDoc = await _firestore.collection('drivers').doc(uid).get();
+      if (driverDoc.exists) {
+        AppLogger.info("Role found via drivers collection fallback for UID: $uid");
+        return 'Driver';
+      }
+
+      AppLogger.warning("No role found for UID: $uid in either users or drivers collection");
     } catch (e) {
       AppLogger.error("Error getting user role: $e");
     }
@@ -92,6 +118,7 @@ class AuthService {
     String? regNo,
     String? department,
     String? semester,
+    String? phone,
   }) async {
     final Map<String, dynamic> data = {};
     if (profileImageUrl != null) data['profileImage'] = profileImageUrl;
@@ -99,6 +126,7 @@ class AuthService {
     if (regNo != null) data['regNo'] = regNo;
     if (department != null) data['department'] = department;
     if (semester != null) data['semester'] = semester;
+    if (phone != null) data['phone'] = phone;
 
     if (data.isNotEmpty) {
       await _firestore.collection('users').doc(uid).update(data);

@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/widgets/custom_app_bar.dart';
 import 'package:uni_transit/views/add_schedule_screen.dart';
+import 'package:uni_transit/core/routes/app_routes.dart';
+
 
 /// Admin Dashboard providing oversight of the entire UniTransit system.
 /// Shows live bus count, total users, active trips, and emergency alerts.
@@ -14,7 +16,17 @@ class AdminDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: const CustomAppBar(title: "ADMIN PANEL"),
+      appBar: CustomAppBar(
+        title: "ADMIN PANEL",
+        actions: [
+          IconButton(
+            onPressed: () => Navigator.pushNamed(context, AppRoutes.notifications),
+            icon: const Icon(Icons.notifications_outlined),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(

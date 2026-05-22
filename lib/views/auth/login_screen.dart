@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:uni_transit/core/constants/app_assets.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
@@ -45,22 +46,82 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final authState = ref.read(authStateProvider);
     if (authState.hasError) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(authState.error.toString())));
+        _showError(authState.error.toString());
       }
     } else if (authState.hasValue && authState.value != null) {
       if (!mounted) return;
 
-      final prefs = await SharedPreferences.getInstance();
-      if (!mounted) return;
+      // Show a small loading indicator while we confirm the role
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
+      );
 
+      final prefs = await SharedPreferences.getInstance();
       String? role = prefs.getString('user_role');
 
-      if (role == 'Driver') {
-        Navigator.pushReplacementNamed(context, '/driver_dashboard');
+      // Force fetch if missing
+      if (role == null) {
+        final authService = ref.read(authServiceProvider);
+        role = await authService.getUserRole(authState.value!.uid);
+        if (role != null) await prefs.setString('user_role', role);
+      }
+
+      if (mounted) Navigator.pop(context); // Remove loading dialog
+
+      if (role == null) {
+        _showError("Account role not found. Please contact admin.");
+        return;
+      }
+
+      final roleLower = role.toLowerCase().trim();
+      
+      if (roleLower == 'driver') {
+        // Check if driver is verified and blocked
+        final driverDoc = await FirebaseFirestore.instance.collection('drivers').doc(authState.value!.uid).get();
+        bool isVerified = false;
+        bool isBlocked = false;
+        if (driverDoc.exists) {
+          final data = driverDoc.data();
+          isVerified = data?['isVerified'] == true || data?['isVerified'] == 'true';
+          isBlocked = data?['isBlocked'] == true || data?['isBlocked'] == 'true';
+        }
+        
+        if (isBlocked) {
+          Navigator.pushReplacementNamed(context, AppRoutes.blockedDriver);
+        } else if (isVerified) {
+          Navigator.pushReplacementNamed(context, AppRoutes.driverDashboard);
+        } else {
+          Navigator.pushReplacementNamed(context, AppRoutes.unverifiedDriver);
+        }
+      } else if (roleLower == 'admin') {
+        Navigator.pushReplacementNamed(context, AppRoutes.adminDashboard);
+      } else if (roleLower == 'student') {
+        final studentDoc = await FirebaseFirestore.instance.collection('users').doc(authState.value!.uid).get();
+        bool isBlocked = false;
+        if (studentDoc.exists) {
+          final data = studentDoc.data();
+          isBlocked = data?['isBlocked'] == true || data?['isBlocked'] == 'true';
+        }
+        if (isBlocked) {
+          Navigator.pushReplacementNamed(context, AppRoutes.blockedStudent);
+        } else {
+          Navigator.pushReplacementNamed(context, AppRoutes.studentDashboard);
+        }
       } else {
-        Navigator.pushReplacementNamed(context, '/student_dashboard');
+        _showError("Unknown role: $role. Redirecting to student dashboard.");
+        final studentDoc = await FirebaseFirestore.instance.collection('users').doc(authState.value!.uid).get();
+        bool isBlocked = false;
+        if (studentDoc.exists) {
+          final data = studentDoc.data();
+          isBlocked = data?['isBlocked'] == true || data?['isBlocked'] == 'true';
+        }
+        if (isBlocked) {
+          Navigator.pushReplacementNamed(context, AppRoutes.blockedStudent);
+        } else {
+          Navigator.pushReplacementNamed(context, AppRoutes.studentDashboard);
+        }
       }
     }
   }

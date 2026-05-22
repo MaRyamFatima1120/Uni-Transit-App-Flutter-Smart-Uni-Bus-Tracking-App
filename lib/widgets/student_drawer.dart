@@ -113,9 +113,20 @@ class _StudentDrawerState extends ConsumerState<StudentDrawer> {
             decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: AppColors.primaryYellow, width: 2)), 
             child: CircleAvatar(
               radius: 35, 
-              backgroundColor: Colors.white10, 
+              backgroundColor: isLoading ? Colors.white10 : AppColors.primaryYellow.withValues(alpha: 0.2),
               backgroundImage: profileUrl.isNotEmpty ? NetworkImage(profileUrl) : null, 
-              child: profileUrl.isEmpty ? Icon(isLoading ? Icons.hourglass_empty : Icons.person, color: Colors.white, size: 35) : null
+              child: profileUrl.isEmpty
+                  ? isLoading
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text(
+                          name.isNotEmpty ? name.trim()[0].toUpperCase() : 'S',
+                          style: GoogleFonts.poppins(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primaryYellow,
+                          ),
+                        )
+                  : null,
             )
           ),
           if (!isLoading) Container(

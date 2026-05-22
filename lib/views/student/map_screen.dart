@@ -22,6 +22,7 @@ import 'package:uni_transit/services/trip_alert_service.dart';
 import 'package:uni_transit/core/constants/custom_routes.dart';
 import 'package:uni_transit/view_models/route_provider.dart';
 import 'package:uni_transit/view_models/bus_provider.dart';
+import 'package:uni_transit/view_models/map_ui_provider.dart';
 
 // 🚀 PROFESSIONAL FEATURES ADDED:
 // 1. Hub Snapping: Markers automatically align with polyline ends.
@@ -33,28 +34,16 @@ class MapScreen extends ConsumerStatefulWidget {
   ConsumerState<MapScreen> createState() => _MapScreenState();
 }
 
-class _MapScreenState extends ConsumerState<MapScreen>
-    with TickerProviderStateMixin {
+class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateMixin {
   final LatLng _defaultLocation = CampusLocations.baghdadCampus;
-  LatLng _userLocation = CampusLocations.baghdadCampus;
-  bool _hasUserLocation = false;
-  final Set<String> _notifiedBuses = {};
-
   final MapController _mapController = MapController();
-
-  final Map<String, LatLng> _animatedPositions = {};
-  final Map<String, double> _busHeadings = {};
+  
   // Cache of computed ETAs per bus
   final Map<String, EtaInfo> _busEtas = {};
 
-  // Performance: Track subscriptions and animation controllers for proper cleanup
   StreamSubscription? _tripAlertsSubscription;
-  final Map<String, AnimationController> _busAnimControllers = {};
   DateTime _lastEtaUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastFleetFit = DateTime.fromMillisecondsSinceEpoch(0);
-
-  String _selectedGender = "All";
-  StreamSubscription? _userPrefSubscription;
 
 
 
@@ -62,57 +51,13 @@ class _MapScreenState extends ConsumerState<MapScreen>
   @override
   void initState() {
     super.initState();
-    _listenToTripAlerts(); // ⚡ NEW: Professional Trip Start Notifications
-    _listenToUserPreferences(); // ⚡ NEW: Real-time Backend Sync for Gender Filter
+    _listenToTripAlerts();
     _getCurrentLocation();
-  }
-
-  void _listenToUserPreferences() {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      _userPrefSubscription = FirebaseFirestore.instance
-          .collection('students')
-          .doc(user.uid)
-          .snapshots()
-          .listen((snapshot) {
-        if (snapshot.exists && mounted) {
-          final data = snapshot.data();
-          if (data != null && data.containsKey('gender_preference')) {
-            setState(() {
-              _selectedGender = data['gender_preference'] ?? "All";
-            });
-          }
-        }
-      });
-    }
-  }
-
-  Future<void> _updateGenderInBackend(String gender) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      try {
-        await FirebaseFirestore.instance
-            .collection('students')
-            .doc(user.uid)
-            .set({
-              'gender_preference': gender,
-            }, SetOptions(merge: true));
-      } catch (e) {
-        debugPrint("Error updating gender preference: $e");
-      }
-    }
   }
 
   @override
   void dispose() {
-    // Performance: Cancel all subscriptions to prevent memory leaks
     _tripAlertsSubscription?.cancel();
-    _userPrefSubscription?.cancel();
-    // Dispose all cached animation controllers
-    for (final controller in _busAnimControllers.values) {
-      controller.dispose();
-    }
-    _busAnimControllers.clear();
     super.dispose();
   }
 
@@ -154,12 +99,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
     });
 
     if (trackingBusId != null) {
-      final busPos =
-          _animatedPositions[trackingBusId] ??
-          LatLng(
-            (busData[trackingBusId]['latitude'] as num).toDouble(),
-            (busData[trackingBusId]['longitude'] as num).toDouble(),
-          );
+      final busPos = LatLng(
+        (busData[trackingBusId]['latitude'] as num).toDouble(),
+        (busData[trackingBusId]['longitude'] as num).toDouble(),
+      );
 
       // Smoothly pan to the bus position
       _animatedMapMove(busPos, 15.5);
@@ -211,7 +154,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
     final List<Marker> markers = [];
     stopsData.forEach((id, data) {
       final stopRoute = data['route'] as String? ?? "";
-      // Only show stops for the selected route
       if (stopRoute != routeState.selectedRoute) return;
 
       final lat = (data['latitude'] as num).toDouble();
@@ -220,39 +162,49 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
       markers.add(
         Marker(
-          width: 100,
-          height: 60,
+          width: 140,
+          height: 80,
           point: LatLng(lat, lng),
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: const [
-                    BoxShadow(color: Colors.black12, blurRadius: 4),
-                  ],
-                  border: Border.all(
-                    color: AppColors.primaryNavy.withValues(alpha: 0.2),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Beautiful Pill Label
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange, width: 1.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        blurRadius: 6,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    name,
+                    style: GoogleFonts.poppins(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange.shade800,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                child: Text(
-                  name,
-                  style: GoogleFonts.poppins(
-                    fontSize: 8,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primaryNavy,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                const SizedBox(height: 4),
+                // Premium Dot Pin
+                const Icon(
+                  Icons.radio_button_checked,
+                  color: Colors.orange,
+                  size: 16,
                 ),
-              ),
-              const Icon(
-                Icons.radio_button_checked_rounded,
-                color: AppColors.primaryNavy,
-                size: 16,
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       );
@@ -286,7 +238,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   void _checkProximity(Map<String, dynamic> buses) {
     final routeState = ref.read(routeProvider);
-    if (!_hasUserLocation || routeState.toHub == null) return;
+    final uiState = ref.read(mapUiProvider);
+    if (!uiState.hasUserLocation || routeState.toHub == null) return;
     buses.forEach((id, data) {
       if (data['to'] != routeState.toHub) return;
       if (data['latitude'] == null || data['longitude'] == null) return;
@@ -296,11 +249,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
       );
       final distance = const Distance().as(
         LengthUnit.Meter,
-        _userLocation,
+        uiState.userLocation,
         busPos,
       );
-      if (distance < 1000 && !_notifiedBuses.contains(id)) {
-        _notifiedBuses.add(id);
+      if (distance < 1000 && !uiState.notifiedBuses.contains(id)) {
+        ref.read(mapUiProvider.notifier).addNotifiedBus(id);
         NotificationService.show(
           title: "Bus Approaching",
           message: "Bus #$id is within 1 KM!",
@@ -310,226 +263,47 @@ class _MapScreenState extends ConsumerState<MapScreen>
     });
   }
 
-  void _animateBusMarkers(Map<String, dynamic> newData) {
-    newData.forEach((id, data) {
-      if (data['latitude'] == null || data['longitude'] == null) return;
-      final targetPos = LatLng(
-        (data['latitude'] as num).toDouble(),
-        (data['longitude'] as num).toDouble(),
-      );
-      final currentPos = _animatedPositions[id] ?? targetPos;
-      final targetHeading = (data['heading'] ?? 0.0).toDouble();
-
-      // Performance: Dispose old controller before creating new one
-      _busAnimControllers[id]?.dispose();
-
-      // ⚡ SPEED & UX OPT: 2-second duration for smooth vehicular feel
-      final controller = AnimationController(
-        vsync: this,
-        duration: const Duration(seconds: 2),
-      );
-      _busAnimControllers[id] = controller;
-
-      final animation = CurvedAnimation(
-        parent: controller,
-        curve: Curves.easeInOut,
-      );
-
-      final latTween = Tween<double>(
-        begin: currentPos.latitude,
-        end: targetPos.latitude,
-      );
-      final lngTween = Tween<double>(
-        begin: currentPos.longitude,
-        end: targetPos.longitude,
-      );
-      final headTween = Tween<double>(
-        begin: _busHeadings[id] ?? targetHeading,
-        end: targetHeading,
-      );
-
-      controller.addListener(() {
-        if (mounted) {
-          setState(() {
-            _animatedPositions[id] = LatLng(
-              latTween.evaluate(animation),
-              lngTween.evaluate(animation),
-            );
-            _busHeadings[id] = headTween.evaluate(animation);
-          });
-        }
-      });
-      controller.forward();
-    });
-  }
-
-
-
   List<Marker> _getMarkers() {
     final List<Marker> markers = [];
     final routeState = ref.read(routeProvider);
     final busData = ref.read(busProvider).liveBusData;
+    final uiState = ref.read(mapUiProvider);
 
     busData.forEach((id, data) {
-      // ⚡ SMART FILTERING: If a route is selected, filter. Otherwise show all active buses.
       if (routeState.selectedRoute != null) {
         final busFrom = (data['from'] as String? ?? '').toLowerCase().trim();
         final busTo = (data['to'] as String? ?? '').toLowerCase().trim();
         final selFrom = (routeState.fromHub ?? '').toLowerCase().trim();
         final selTo = (routeState.toHub ?? '').toLowerCase().trim();
 
-        // Strict matching: Check if the hub names match exactly or contain each other
-        bool fromMatches =
-            busFrom.contains(selFrom) || selFrom.contains(busFrom);
+        bool fromMatches = busFrom.contains(selFrom) || selFrom.contains(busFrom);
         bool toMatches = busTo.contains(selTo) || selTo.contains(busTo);
-
         if (!(fromMatches && toMatches)) return;
       }
 
       final gender = data['gender'] ?? 'Combined';
-      if (_selectedGender != "All" && gender != _selectedGender) return;
+      if (uiState.selectedGender != "All" && gender != uiState.selectedGender) return;
 
       final lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
       final lng = (data['longitude'] as num?)?.toDouble() ?? 0.0;
-
-      // ⚡ CRITICAL: Ignore invalid or non-started coordinates
       if (lat == 0.0 || lng == 0.0) return;
 
-      final pos = _animatedPositions[id] ?? LatLng(lat, lng);
-
-      final heading = _busHeadings[id] ?? 0.0;
-      
-      // ⚡ DYNAMIC COLORING: Fetch color from backend config
-      final genderConfigs = ref.read(genderConfigProvider).genderConfigs;
-      Color markerColor = AppColors.primaryNavy; // Default
-      
-      if (genderConfigs.containsKey(gender)) {
-        final colorStr = genderConfigs[gender]['color'] as String?;
-        if (colorStr != null) {
-          try {
-            String cleanColor = colorStr.replaceAll('#', '').replaceAll('0x', '');
-            // ⚡ FIX: Add Alpha (FF) if only 6 characters (RRGGBB)
-            if (cleanColor.length == 6) cleanColor = 'FF$cleanColor';
-            markerColor = Color(int.parse(cleanColor, radix: 16));
-          } catch (e) {
-            debugPrint("Error parsing color for $gender: $e");
-          }
-        }
-      } else if (gender == 'Girls') {
-        markerColor = Colors.pinkAccent;
-      } else if (gender == 'Boys') {
-        markerColor = Colors.blueAccent;
-      }
-
+      final heading = (data['heading'] ?? 0.0).toDouble();
       final etaInfo = _busEtas[id];
-      // ⚡ REAL-TIME: Use driver-pushed ETA if available, otherwise fallback to local estimate
-      final etaText =
-          data['remainingTime'] != null &&
-                  (data['remainingTime'] as String).isNotEmpty
-              ? data['remainingTime']
-              : (etaInfo != null ? etaInfo.etaMarkerDisplay : "---");
 
       markers.add(
         Marker(
-          width: 80,
-          height: 80,
-          point: pos,
-          child: RepaintBoundary(
-            // ⚡ PERFORMANCE: Isolate marker painting
-            child: GestureDetector(
+          width: 100,
+          height: 100,
+          point: LatLng(lat, lng),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: AnimatedBusMarker(
+              id: id,
+              data: Map<String, dynamic>.from(data),
+              heading: heading,
+              etaInfo: etaInfo,
               onTap: () => _showBusDetails(id, Map<String, dynamic>.from(data)),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // ⚡ PROFESSIONAL: Pulsing background to show "Live" status
-                  _buildPulseEffect(markerColor),
-
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Floating ETA Tag
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: markerColor,
-                          borderRadius: BorderRadius.circular(8),
-                          boxShadow: [
-                            BoxShadow(
-                              color: markerColor.withValues(alpha: 0.3),
-                              blurRadius: 8,
-                            ),
-                          ],
-                        ),
-                        child: Text(
-                          etaText,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      // Professional Circular Bus Icon with Direction
-                      Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              border: Border.all(color: markerColor, width: 2),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.1),
-                                  blurRadius: 10,
-                                ),
-                              ],
-                            ),
-                            child: CircleAvatar(
-                              radius: 15,
-                              backgroundColor: markerColor.withValues(
-                                alpha: 0.1,
-                              ),
-                              child: Icon(
-                                Icons.directions_bus_rounded,
-                                color: markerColor,
-                                size: 18,
-                              ),
-                            ),
-                          ),
-                          // Directional Arrow
-                          Transform.rotate(
-                            angle: (heading * (3.14159 / 180)),
-                            child: SizedBox(
-                              width: 42,
-                              height: 42,
-                              child: Stack(
-                                children: [
-                                  Positioned(
-                                    top: 0,
-                                    left: 0,
-                                    right: 0,
-                                    child: Icon(
-                                      Icons.navigation_rounded,
-                                      color: markerColor,
-                                      size: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
             ),
           ),
         ),
@@ -629,8 +403,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
           ),
           child: Text(
             name.split(' ')[0], // Short name
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: color == AppColors.primaryYellow ? AppColors.primaryNavy : Colors.white,
               fontSize: 10,
               fontWeight: FontWeight.bold,
             ),
@@ -644,9 +418,13 @@ class _MapScreenState extends ConsumerState<MapScreen>
             if (!isDestination && color != Colors.grey[400])
               _buildPulseEffect(color),
             Icon(Icons.location_on_rounded, color: color, size: 38),
-            const Positioned(
+            Positioned(
               top: 8,
-              child: Icon(Icons.circle, color: Colors.white, size: 10),
+              child: Icon(
+                Icons.circle,
+                color: color == AppColors.primaryYellow ? AppColors.primaryNavy : Colors.white,
+                size: 10,
+              ),
             ),
           ],
         ),
@@ -716,9 +494,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
   @override
   Widget build(BuildContext context) {
     final routeState = ref.watch(routeProvider);
-    final busData = ref.watch(busProvider).liveBusData;
     final hubsData = ref.watch(hubProvider).hubsData;
     final genderConfigs = ref.watch(genderConfigProvider).genderConfigs;
+    final uiState = ref.watch(mapUiProvider);
 
     // ⚡ SYNC: Listen to route changes to trigger map animation
     ref.listen<RouteState>(routeProvider, (previous, next) {
@@ -730,8 +508,8 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
       // 2. ⚡ PROFESSIONAL: Reset to User Location (or Fleet View) when route is cleared
       if (next.selectedRoute == null && previous?.selectedRoute != null) {
-        if (_hasUserLocation) {
-          _animatedMapMove(_userLocation, 15.0);
+        if (uiState.hasUserLocation) {
+          _animatedMapMove(uiState.userLocation, 15.0);
         } else {
           _fitAllBuses();
         }
@@ -740,8 +518,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
     // ⚡ SYNC: Listen to bus data changes for animations and ETAs
     ref.listen<BusState>(busProvider, (previous, next) {
-      _animateBusMarkers(next.liveBusData);
-
       // Smart Auto-follow (Less aggressive)
       if (routeState.selectedRoute == null && next.liveBusData.isNotEmpty) {
         if (_lastFleetFit == DateTime.fromMillisecondsSinceEpoch(0)) {
@@ -785,10 +561,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
                   polylines: <Polyline>[
                     Polyline(
                       points: routeState.routePoints,
-                      color: AppColors.primaryYellow.withValues(alpha: 0.8),
+                      color: const Color(0xFF1A237E),
                       strokeWidth: 5.0,
                       borderStrokeWidth: 2.0,
-                      borderColor: AppColors.primaryNavy.withValues(alpha: 0.2),
+                      borderColor: const Color(0xFFE8EAF6),
                     ),
                   ],
                 ),
@@ -821,10 +597,10 @@ class _MapScreenState extends ConsumerState<MapScreen>
                             hubKey.contains(selFrom) || selFrom.contains(hubKey);
 
                         Color markerColor = isDest
-                            ? Colors.redAccent
+                            ? Colors.red
                             : (isStart
-                                ? Colors.greenAccent[700]!
-                                : Colors.grey[400]!);
+                                ? Colors.green
+                                : AppColors.primaryYellow);
 
                         final hubLat = (hub.value['latitude'] as num).toDouble();
                         final hubLng = (hub.value['longitude'] as num).toDouble();
@@ -841,17 +617,20 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
                         return Marker(
                           point: markerPos,
-                          width: 80,
-                          height: 100,
-                          child: _buildHubMarker(hub.key, markerColor, isDest),
+                          width: 100,
+                          height: 120,
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: _buildHubMarker(hub.key, markerColor, isDest),
+                          ),
                         );
                       }).toList(),
               ),
-              if (_hasUserLocation)
+              if (uiState.hasUserLocation)
                 MarkerLayer(
                   markers: [
                     Marker(
-                      point: _userLocation,
+                      point: uiState.userLocation,
                       width: 50,
                       height: 50,
                       child: _buildUserLocationMarker(),
@@ -915,7 +694,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                             onChanged: (v) {
                               if (v != null) {
                                 ref.read(routeProvider.notifier).selectRoute(v);
-                                _notifiedBuses.clear();
+                                ref.read(mapUiProvider.notifier).clearNotifications();
                               }
                             },
                           ),
@@ -925,7 +704,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
                         IconButton(
                           onPressed: () {
                             ref.read(routeProvider.notifier).clearSelection();
-                            _notifiedBuses.clear(); // ⚡ UX: Reset proximity alerts
+                            ref.read(mapUiProvider.notifier).clearNotifications();
                           },
                           icon: const Icon(Icons.close_rounded),
                         ),
@@ -1340,9 +1119,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: genders.map((g) {
-            bool isSelected = _selectedGender == g;
+            final uiState = ref.watch(mapUiProvider);
+            bool isSelected = uiState.selectedGender == g;
 
             Color activeColor = AppColors.primaryYellow;
             if (g == "All") {
@@ -1353,45 +1132,46 @@ class _MapScreenState extends ConsumerState<MapScreen>
                 try {
                   String cleanColor =
                       colorStr.replaceAll('#', '').replaceAll('0x', '');
-                  // ⚡ FIX: Add Alpha (FF) if only 6 characters (RRGGBB)
                   if (cleanColor.length == 6) cleanColor = 'FF$cleanColor';
                   activeColor = Color(int.parse(cleanColor, radix: 16));
                 } catch (e) {
                   debugPrint("Error parsing color for $g: $e");
                 }
               }
-            } else if (g == "Girls") {
-              activeColor = Colors.pinkAccent;
-            } else if (g == "Boys") {
-              activeColor = Colors.blueAccent;
             }
 
-            return GestureDetector(
-              onTap: () {
-                setState(() {
-                  _selectedGender = g;
-                });
-                _updateGenderInBackend(g);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.easeOutQuint,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: 8,
-                ),
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                decoration: BoxDecoration(
-                  color: isSelected ? activeColor : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  g.toUpperCase(),
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: isSelected ? Colors.white : Colors.grey[400],
-                    letterSpacing: 0.5,
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: GestureDetector(
+                onTap: () {
+                  ref.read(mapUiProvider.notifier).updateGenderPreference(g);
+                  _updateGenderInBackend(g);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: isSelected ? activeColor : Colors.transparent,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow:
+                        isSelected
+                            ? [
+                              BoxShadow(
+                                color: activeColor.withValues(alpha: 0.3),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
+                            ]
+                            : null,
+                  ),
+                  child: Text(
+                    g.toUpperCase(),
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: isSelected ? Colors.white : Colors.grey[600],
+                      letterSpacing: 0.5,
+                    ),
                   ),
                 ),
               ),
@@ -1400,6 +1180,16 @@ class _MapScreenState extends ConsumerState<MapScreen>
         ),
       ),
     );
+  }
+
+  void _updateGenderInBackend(String gender) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({'genderPreference': gender});
+    }
   }
 
   Future<void> _getCurrentLocation() async {
@@ -1565,31 +1355,35 @@ class _MapScreenState extends ConsumerState<MapScreen>
     // Permission granted — get current position
     try {
       final position = await Geolocator.getCurrentPosition();
-      if (mounted)
-        setState(() {
-          _userLocation = LatLng(position.latitude, position.longitude);
-          _hasUserLocation = true;
-          _mapController.move(_userLocation, 14);
-        });
+        final uiNotifier = ref.read(mapUiProvider.notifier);
+        uiNotifier.updateUserLocation(
+          LatLng(position.latitude, position.longitude),
+        );
+        _mapController.move(
+          LatLng(position.latitude, position.longitude),
+          14,
+        );
     } catch (e) {
       // Silently handle — user location is optional enhancement
     }
   }
 
-  void _handleSOS() async {
+  void _handleSOS() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      await SOSService().sendSOS(
-        userId: user.uid,
-        userName: user.displayName ?? "Student",
-        lat: _userLocation.latitude,
-        lng: _userLocation.longitude,
-        message: "Help!",
-      );
-      NotificationService.show(
-        title: "SOS Triggered",
-        message: "Emergency alert sent to university admin.",
-        type: NotificationType.error,
+      final uiState = ref.read(mapUiProvider);
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) {
+          return _SOSOptionsBottomSheet(
+            userId: user.uid,
+            userName: user.displayName ?? "Student",
+            lat: uiState.userLocation.latitude,
+            lng: uiState.userLocation.longitude,
+          );
+        },
       );
     }
   }
@@ -1638,4 +1432,557 @@ class _MarkerPointerPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class AnimatedBusMarker extends ConsumerWidget {
+  final String id;
+  final Map<String, dynamic> data;
+  final double heading;
+  final EtaInfo? etaInfo;
+  final VoidCallback onTap;
+
+  const AnimatedBusMarker({
+    super.key,
+    required this.id,
+    required this.data,
+    required this.heading,
+    this.etaInfo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final gender = data['gender'] ?? 'Combined';
+    final genderConfigs = ref.watch(genderConfigProvider).genderConfigs;
+    
+    Color markerColor = const Color(0xFF000080); // Default Navy
+    
+    if (genderConfigs.containsKey(gender)) {
+      final colorStr = genderConfigs[gender]['color'] as String?;
+      if (colorStr != null) {
+        try {
+          String cleanColor = colorStr.replaceAll('#', '').replaceAll('0x', '');
+          if (cleanColor.length == 6) cleanColor = 'FF$cleanColor';
+          markerColor = Color(int.parse(cleanColor, radix: 16));
+        } catch (e) {}
+      }
+    } else if (gender == 'Girls') {
+      markerColor = Colors.pinkAccent;
+    } else if (gender == 'Boys') {
+      markerColor = Colors.blueAccent;
+    }
+
+    final etaText = data['remainingTime'] != null && (data['remainingTime'] as String).isNotEmpty
+        ? data['remainingTime']
+        : (etaInfo?.etaMarkerDisplay ?? "---");
+
+    return RepaintBoundary(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            _PulseEffect(color: markerColor),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: markerColor,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: markerColor.withOpacity(0.3),
+                        blurRadius: 8,
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    etaText,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 8,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: markerColor, width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: CircleAvatar(
+                        radius: 15,
+                        backgroundColor: markerColor.withOpacity(0.1),
+                        child: Icon(
+                          Icons.directions_bus_rounded,
+                          color: markerColor,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                    Transform.rotate(
+                      angle: (heading * (3.14159 / 180)),
+                      child: SizedBox(
+                        width: 42,
+                        height: 42,
+                        child: Stack(
+                          children: [
+                            Positioned(
+                              top: 0,
+                              left: 0,
+                              right: 0,
+                              child: Icon(
+                                Icons.navigation_rounded,
+                                color: markerColor,
+                                size: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PulseEffect extends StatefulWidget {
+  final Color color;
+  const _PulseEffect({required this.color});
+
+  @override
+  State<_PulseEffect> createState() => _PulseEffectState();
+}
+
+class _PulseEffectState extends State<_PulseEffect> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.6, end: 0.0).animate(_controller),
+      child: ScaleTransition(
+        scale: Tween<double>(begin: 0.5, end: 1.2).animate(_controller),
+        child: Container(
+          width: 50,
+          height: 50,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: widget.color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SOSOptionsBottomSheet extends StatefulWidget {
+  final String userId;
+  final String userName;
+  final double lat;
+  final double lng;
+
+  const _SOSOptionsBottomSheet({
+    required this.userId,
+    required this.userName,
+    required this.lat,
+    required this.lng,
+  });
+
+  @override
+  State<_SOSOptionsBottomSheet> createState() => _SOSOptionsBottomSheetState();
+}
+
+class _SOSOptionsBottomSheetState extends State<_SOSOptionsBottomSheet> {
+  final TextEditingController _customReasonController = TextEditingController();
+  Timer? _countdownTimer;
+  int _secondsRemaining = 5;
+  bool _isSending = false;
+
+  final List<Map<String, dynamic>> _presets = [
+    {
+      'label': 'Accident / Hadsa',
+      'icon': Icons.car_crash_rounded,
+      'color': Colors.red[800]!,
+      'message': 'Accident / Collision reported.',
+    },
+    {
+      'label': 'Medical Emergency',
+      'icon': Icons.medical_services_rounded,
+      'color': Colors.redAccent,
+      'message': 'Medical assistance needed.',
+    },
+    {
+      'label': 'Security / Threat',
+      'icon': Icons.security_rounded,
+      'color': Colors.red[900]!,
+      'message': 'Harassment / Security threat reported.',
+    },
+    {
+      'label': 'Bus Breakdown',
+      'icon': Icons.build_rounded,
+      'color': Colors.amber[800]!,
+      'message': 'Technical breakdown reported.',
+    },
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _customReasonController.addListener(_onTextChanged);
+    _startCountdown();
+  }
+
+  void _onTextChanged() {
+    if (_customReasonController.text.isNotEmpty && _countdownTimer != null) {
+      setState(() {
+        _countdownTimer?.cancel();
+        _countdownTimer = null;
+      });
+    }
+  }
+
+  void _startCountdown() {
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsRemaining > 1) {
+        if (mounted) {
+          setState(() {
+            _secondsRemaining--;
+          });
+        }
+      } else {
+        _countdownTimer?.cancel();
+        _sendAlert('General Panic SOS triggered.');
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _customReasonController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendAlert(String message) async {
+    if (_isSending) return;
+    if (mounted) {
+      setState(() {
+        _isSending = true;
+      });
+    }
+    _countdownTimer?.cancel();
+
+    try {
+      Map<String, dynamic>? studentDetails;
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get();
+        if (doc.exists) {
+          studentDetails = doc.data();
+        }
+      } catch (e) {
+        debugPrint("Error loading student details for SOS: $e");
+      }
+
+      final Map<String, dynamic> extraDetails = {
+        'role': 'Student',
+      };
+      if (studentDetails != null) {
+        if (studentDetails['studentId'] != null) extraDetails['studentId'] = studentDetails['studentId'];
+        if (studentDetails['rollNo'] != null) extraDetails['rollNo'] = studentDetails['rollNo'];
+        if (studentDetails['regNo'] != null) extraDetails['regNo'] = studentDetails['regNo'];
+        if (studentDetails['department'] != null) extraDetails['department'] = studentDetails['department'];
+        if (studentDetails['semester'] != null) extraDetails['semester'] = studentDetails['semester'];
+        if (studentDetails['phoneNumber'] != null) extraDetails['phoneNumber'] = studentDetails['phoneNumber'];
+        if (studentDetails['phone'] != null) extraDetails['phone'] = studentDetails['phone'];
+        if (studentDetails['email'] != null) extraDetails['email'] = studentDetails['email'];
+        if (studentDetails['gender'] != null) extraDetails['gender'] = studentDetails['gender'];
+        if (studentDetails['genderPreference'] != null) extraDetails['genderPreference'] = studentDetails['genderPreference'];
+        if (studentDetails['profileImage'] != null) extraDetails['profileImage'] = studentDetails['profileImage'];
+        if (studentDetails['profileUrl'] != null) extraDetails['profileUrl'] = studentDetails['profileUrl'];
+        if (studentDetails['isVerified'] != null) extraDetails['isVerified'] = studentDetails['isVerified'];
+        if (studentDetails['isBlocked'] != null) extraDetails['isBlocked'] = studentDetails['isBlocked'];
+        if (studentDetails['status'] != null) extraDetails['status'] = studentDetails['status'];
+      }
+
+      await SOSService().sendSOS(
+        userId: widget.userId,
+        userName: widget.userName,
+        lat: widget.lat,
+        lng: widget.lng,
+        message: message,
+        extraDetails: extraDetails,
+      );
+
+      if (mounted) {
+        Navigator.pop(context);
+        NotificationService.show(
+          title: "SOS Triggered",
+          message: "Emergency alert sent to university admin.",
+          type: NotificationType.error,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send SOS: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    
+    return Container(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(32),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 20,
+              offset: Offset(0, -5),
+            ),
+          ],
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Flashing Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.emergency_rounded, color: Colors.red, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'EMERGENCY SOS',
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      _countdownTimer?.cancel();
+                      Navigator.pop(context);
+                    },
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              if (_countdownTimer != null) ...[
+                // Countdown indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          value: _secondsRemaining / 5.0,
+                          strokeWidth: 3,
+                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.amber),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Sending automatic SOS in $_secondsRemaining seconds...',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.amber[900],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+              
+              Text(
+                'If possible, select a reason below for faster dispatch:',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Presets Grid
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 2.2,
+                ),
+                itemCount: _presets.length,
+                itemBuilder: (context, index) {
+                  final preset = _presets[index];
+                  final label = preset['label'] as String;
+                  final icon = preset['icon'] as IconData;
+                  final color = preset['color'] as Color;
+                  final msg = preset['message'] as String;
+                  
+                  return InkWell(
+                    onTap: () => _sendAlert(msg),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: color.withOpacity(0.2), width: 1.5),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(icon, color: color, size: 24),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              label,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: color,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+              
+              // Custom Text Field
+              TextField(
+                controller: _customReasonController,
+                decoration: InputDecoration(
+                  hintText: 'Or type custom emergency reason here...',
+                  hintStyle: GoogleFonts.poppins(fontSize: 12),
+                  filled: true,
+                  fillColor: Colors.grey[50],
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.send_rounded, color: Colors.red),
+                    onPressed: () {
+                      final val = _customReasonController.text.trim();
+                      if (val.isNotEmpty) {
+                        _sendAlert('Custom SOS: $val');
+                      } else {
+                        _sendAlert('General Panic SOS triggered.');
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Instant SOS Button
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _sendAlert('General Panic SOS triggered.'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: Text(
+                        'INSTANT SOS',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

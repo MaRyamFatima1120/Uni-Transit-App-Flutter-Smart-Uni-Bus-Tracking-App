@@ -5,6 +5,8 @@ class BusSchedule {
   final String departureTime;
   final List<String> stops;
   final String type; // Boys Special, Girls Special, Combined
+  final List<String>? operatingDays; // e.g. ["Monday", "Tuesday"]
+  final String? date; // Specific date in YYYY-MM-DD format
 
   BusSchedule({
     required this.id,
@@ -13,6 +15,8 @@ class BusSchedule {
     required this.departureTime,
     required this.stops,
     required this.type,
+    this.operatingDays,
+    this.date,
   });
 
   // Convert to Map for Firestore
@@ -23,6 +27,8 @@ class BusSchedule {
       'departureTime': departureTime,
       'stops': stops,
       'type': type,
+      'operatingDays': operatingDays ?? [],
+      'date': date,
     };
   }
 
@@ -35,6 +41,8 @@ class BusSchedule {
       departureTime: map['departureTime'] ?? '',
       stops: List<String>.from(map['stops'] ?? []),
       type: map['type'] ?? 'Combined',
+      operatingDays: map['operatingDays'] != null ? List<String>.from(map['operatingDays']) : null,
+      date: map['date'],
     );
   }
 }

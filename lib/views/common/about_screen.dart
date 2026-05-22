@@ -13,147 +13,135 @@ class AboutScreen extends ConsumerWidget {
     final appInfoAsync = ref.watch(appInfoProvider);
 
     return Scaffold(
-      body: Container(
-        width: double.infinity,
-        height: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
-          ),
-        ),
-        child: SafeArea(
-          child: appInfoAsync.when(
-            data: (appInfo) => SingleChildScrollView(
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                children: [
-                  _buildTopBar(context),
-                  const SizedBox(height: 20),
-                  
-                  // Brand Section
-                  Center(
-                    child: Hero(
-                      tag: 'app_logo',
-                      child: Container(
-                        width: 130,
-                        height: 130,
-                        padding: const EdgeInsets.all(24),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: AppColors.primaryYellow.withOpacity(0.2),
-                              blurRadius: 30,
-                              spreadRadius: 5,
-                            )
-                          ],
-                        ),
-                        child: appInfo.appLogoUrl.isNotEmpty 
-                          ? Image.network(
-                              appInfo.appLogoUrl,
-                              errorBuilder: (context, error, stackTrace) => Image.asset(AppAssets.iubLogo),
-                            )
-                          : Image.asset(AppAssets.iubLogo),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  Text(
-                    "UniTransit", 
-                    style: GoogleFonts.poppins(
-                      fontSize: 32, 
-                      fontWeight: FontWeight.w900, 
-                      color: Colors.white, 
-                      letterSpacing: 2
-                    )
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    "Smart University Transport System", 
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      fontSize: 12, 
-                      color: AppColors.primaryYellow, 
-                      fontWeight: FontWeight.w700, 
-                      letterSpacing: 1.5
-                    )
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.1), 
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
-                    ),
-                    child: Text(
-                      appInfo.version.isEmpty ? "Version 1.2.0 (Stable)" : "Version ${appInfo.version}", 
-                      style: GoogleFonts.poppins(
-                        fontSize: 11, 
-                        fontWeight: FontWeight.w700, 
-                        color: Colors.white70
-                      )
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 48),
-                  
-                  // Project Details Section
-                  _buildDetailSection(
-                    title: "PROJECT VISION",
-                    content: appInfo.vision.isEmpty 
-                      ? "UniTransit is a state-of-the-art solution designed for The Islamia University of Bahawalpur to digitize the bus tracking experience. It leverages real-time GPS data, Firebase synchronization, and smart routing algorithms to ensure students never miss their commute."
-                      : appInfo.vision,
-                  ),
-                  
-                  const SizedBox(height: 24),
-                  
-                  // Contributors Section
-                  _buildDetailSection(
-                    title: "CONTRIBUTORS",
-                    isList: true,
-                    items: appInfo.contributors.isEmpty ? [
-                      {"role": "Lead Developer", "name": "Noor Mustafa", "subtitle": "Roll No: F22BDOCS1M01160"},
-                      {"role": "Supervisor", "name": "Dr. Umar Farooq Shafi", "subtitle": "Department of CS & IT, IUB"},
-                    ] : appInfo.contributors.map((c) => {
-                      "role": c.role,
-                      "name": c.name,
-                      "subtitle": c.subtitle,
-                    }).toList(),
-                  ),
-                  
-                  const SizedBox(height: 60),
-                  
-                  // IUB Branding
-                  Opacity(
-                    opacity: 0.5,
-                    child: Column(
-                      children: [
-                        Text(
-                          appInfo.university.isEmpty ? "THE ISLAMIA UNIVERSITY OF BAHAWALPUR" : appInfo.university.toUpperCase(), 
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.poppins(
-                            fontSize: 10, 
-                            fontWeight: FontWeight.w800, 
-                            color: Colors.white, 
-                            letterSpacing: 1.5
+      backgroundColor: AppColors.backgroundLight,
+      body: SafeArea(
+        child: appInfoAsync.when(
+          data: (appInfo) => SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              children: [
+                _buildTopBar(context),
+                const SizedBox(height: 20),
+                
+                // Brand Section
+                Center(
+                  child: Hero(
+                    tag: 'app_logo',
+                    child: Container(
+                      width: 130,
+                      height: 130,
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primaryNavy.withValues(alpha: 0.1),
+                            blurRadius: 30,
+                            spreadRadius: 5,
                           )
-                        ),
-                        const SizedBox(height: 12),
-                        const Icon(Icons.school_rounded, color: Colors.white, size: 28),
-                      ],
+                        ],
+                      ),
+                      child: appInfo.appLogoUrl.isNotEmpty 
+                        ? Image.network(
+                            appInfo.appLogoUrl,
+                            errorBuilder: (context, error, stackTrace) => Image.asset(AppAssets.iubLogo),
+                          )
+                        : Image.asset(AppAssets.iubLogo),
                     ),
                   ),
-                  const SizedBox(height: 60),
-                ],
-              ),
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  (appInfo.appName ?? "UniTransit").isEmpty ? "UniTransit" : appInfo.appName, 
+                  style: GoogleFonts.poppins(
+                    fontSize: 32, 
+                    fontWeight: FontWeight.w900, 
+                    color: AppColors.textDark, 
+                    letterSpacing: 2
+                  )
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  (appInfo.appTagline ?? "Smart University Transport System").isEmpty ? "Smart University Transport System" : appInfo.appTagline, 
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 12, 
+                    color: AppColors.primaryNavy, 
+                    fontWeight: FontWeight.w700, 
+                    letterSpacing: 1.5
+                  )
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryNavy.withValues(alpha: 0.08), 
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppColors.primaryNavy.withValues(alpha: 0.15)),
+                  ),
+                  child: Text(
+                    appInfo.version.isEmpty ? "Version 1.2.0 (Stable)" : "Version ${appInfo.version}", 
+                    style: GoogleFonts.poppins(
+                      fontSize: 11, 
+                      fontWeight: FontWeight.w700, 
+                      color: AppColors.primaryNavy
+                    )
+                  ),
+                ),
+                
+                const SizedBox(height: 48),
+                
+                // Project Details Section
+                _buildDetailSection(
+                  title: appInfo.visionHeader.isEmpty ? "PROJECT VISION" : appInfo.visionHeader.toUpperCase(),
+                  content: appInfo.vision.isEmpty 
+                    ? "UniTransit is a state-of-the-art solution designed for The Islamia University of Bahawalpur to digitize the bus tracking experience. It leverages real-time GPS data, Firebase synchronization, and smart routing algorithms to ensure students never miss their commute."
+                    : appInfo.vision,
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Contributors Section
+                _buildDetailSection(
+                  title: "CONTRIBUTORS",
+                  isList: true,
+                  items: appInfo.contributors.isEmpty ? [
+                    {"role": "Lead Developer", "name": "Noor Mustafa", "subtitle": "Roll No: F22BDOCS1M01160"},
+                    {"role": "Supervisor", "name": "Dr. Umar Farooq Shafi", "subtitle": "Department of CS & IT, IUB"},
+                  ] : appInfo.contributors.map((c) => {
+                    "role": c.role,
+                    "name": c.name,
+                    "subtitle": c.subtitle,
+                  }).toList(),
+                ),
+                
+                const SizedBox(height: 60),
+                
+                // IUB Branding
+                Opacity(
+                  opacity: 0.7,
+                  child: Column(
+                    children: [
+                      Text(
+                        appInfo.university.isEmpty ? "THE ISLAMIA UNIVERSITY OF BAHAWALPUR" : appInfo.university.toUpperCase(), 
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.poppins(
+                          fontSize: 10, 
+                          fontWeight: FontWeight.w800, 
+                          color: AppColors.textSecondary, 
+                          letterSpacing: 1.5
+                        )
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 60),
+              ],
             ),
-            loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primaryYellow)),
-            error: (err, stack) => Center(child: Text("Error loading info", style: TextStyle(color: Colors.white))),
           ),
+          loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primaryNavy)),
+          error: (err, stack) => Center(child: Text("Error loading info", style: TextStyle(color: AppColors.textDark))),
         ),
       ),
     );
@@ -165,7 +153,7 @@ class AboutScreen extends ConsumerWidget {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 20),
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, color: AppColors.textDark, size: 20),
             onPressed: () => Navigator.pop(context),
           ),
           const Spacer(),
@@ -174,7 +162,7 @@ class AboutScreen extends ConsumerWidget {
             style: GoogleFonts.poppins(
               fontSize: 13,
               fontWeight: FontWeight.w800,
-              color: Colors.white.withOpacity(0.6),
+              color: AppColors.textSecondary,
               letterSpacing: 2,
             ),
           ),
@@ -191,9 +179,16 @@ class AboutScreen extends ConsumerWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.04),
+        color: Colors.white,
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
+        border: Border.all(color: AppColors.borderLight),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -204,7 +199,7 @@ class AboutScreen extends ConsumerWidget {
                 width: 4,
                 height: 16,
                 decoration: BoxDecoration(
-                  color: AppColors.primaryYellow,
+                  color: AppColors.primaryNavy,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -214,7 +209,7 @@ class AboutScreen extends ConsumerWidget {
                 style: GoogleFonts.poppins(
                   fontSize: 12, 
                   fontWeight: FontWeight.w800, 
-                  color: AppColors.primaryYellow, 
+                  color: AppColors.primaryNavy, 
                   letterSpacing: 1.5
                 )
               ),
@@ -228,7 +223,7 @@ class AboutScreen extends ConsumerWidget {
               style: GoogleFonts.poppins(
                 fontSize: 14, 
                 height: 1.7, 
-                color: Colors.white.withOpacity(0.7)
+                color: AppColors.textDark
               )
             )
           else if (isList && items != null)
@@ -241,7 +236,7 @@ class AboutScreen extends ConsumerWidget {
                     item['role']!, 
                     style: GoogleFonts.poppins(
                       fontSize: 10, 
-                      color: Colors.white.withOpacity(0.4), 
+                      color: AppColors.textSecondary, 
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.5
                     )
@@ -252,7 +247,7 @@ class AboutScreen extends ConsumerWidget {
                     style: GoogleFonts.poppins(
                       fontSize: 16, 
                       fontWeight: FontWeight.bold, 
-                      color: Colors.white
+                      color: AppColors.textDark
                     )
                   ),
                   if (item['subtitle'] != null)
@@ -260,7 +255,7 @@ class AboutScreen extends ConsumerWidget {
                       item['subtitle']!, 
                       style: GoogleFonts.poppins(
                         fontSize: 12, 
-                        color: Colors.white.withOpacity(0.5)
+                        color: AppColors.textSecondary
                       )
                     ),
                 ],
