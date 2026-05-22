@@ -1368,21 +1368,22 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     }
   }
 
-  void _handleSOS() async {
+  void _handleSOS() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       final uiState = ref.read(mapUiProvider);
-      await SOSService().sendSOS(
-        userId: user.uid,
-        userName: user.displayName ?? "Student",
-        lat: uiState.userLocation.latitude,
-        lng: uiState.userLocation.longitude,
-        message: "Help!",
-      );
-      NotificationService.show(
-        title: "SOS Triggered",
-        message: "Emergency alert sent to university admin.",
-        type: NotificationType.error,
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) {
+          return _SOSOptionsBottomSheet(
+            userId: user.uid,
+            userName: user.displayName ?? "Student",
+            lat: uiState.userLocation.latitude,
+            lng: uiState.userLocation.longitude,
+          );
+        },
       );
     }
   }
@@ -1603,6 +1604,382 @@ class _PulseEffectState extends State<_PulseEffect> with SingleTickerProviderSta
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: widget.color,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SOSOptionsBottomSheet extends StatefulWidget {
+  final String userId;
+  final String userName;
+  final double lat;
+  final double lng;
+
+  const _SOSOptionsBottomSheet({
+    required this.userId,
+    required this.userName,
+    required this.lat,
+    required this.lng,
+  });
+
+  @override
+  State<_SOSOptionsBottomSheet> createState() => _SOSOptionsBottomSheetState();
+}
+
+class _SOSOptionsBottomSheetState extends State<_SOSOptionsBottomSheet> {
+  final TextEditingController _customReasonController = TextEditingController();
+  Timer? _countdownTimer;
+  int _secondsRemaining = 5;
+  bool _isSending = false;
+
+  final List<Map<String, dynamic>> _presets = [
+    {
+      'label': 'Accident / Hadsa',
+      'icon': Icons.car_crash_rounded,
+      'color': Colors.red[800]!,
+      'message': 'Accident / Collision reported.',
+    },
+    {
+      'label': 'Medical Emergency',
+      'icon': Icons.medical_services_rounded,
+      'color': Colors.redAccent,
+      'message': 'Medical assistance needed.',
+    },
+    {
+      'label': 'Security / Threat',
+      'icon': Icons.security_rounded,
+      'color': Colors.red[900]!,
+      'message': 'Harassment / Security threat reported.',
+    },
+    {
+      'label': 'Bus Breakdown',
+      'icon': Icons.build_rounded,
+      'color': Colors.amber[800]!,
+      'message': 'Technical breakdown reported.',
+    },
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _customReasonController.addListener(_onTextChanged);
+    _startCountdown();
+  }
+
+  void _onTextChanged() {
+    if (_customReasonController.text.isNotEmpty && _countdownTimer != null) {
+      setState(() {
+        _countdownTimer?.cancel();
+        _countdownTimer = null;
+      });
+    }
+  }
+
+  void _startCountdown() {
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_secondsRemaining > 1) {
+        if (mounted) {
+          setState(() {
+            _secondsRemaining--;
+          });
+        }
+      } else {
+        _countdownTimer?.cancel();
+        _sendAlert('General Panic SOS triggered.');
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    _customReasonController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _sendAlert(String message) async {
+    if (_isSending) return;
+    if (mounted) {
+      setState(() {
+        _isSending = true;
+      });
+    }
+    _countdownTimer?.cancel();
+
+    try {
+      Map<String, dynamic>? studentDetails;
+      try {
+        final doc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get();
+        if (doc.exists) {
+          studentDetails = doc.data();
+        }
+      } catch (e) {
+        debugPrint("Error loading student details for SOS: $e");
+      }
+
+      final Map<String, dynamic> extraDetails = {
+        'role': 'Student',
+      };
+      if (studentDetails != null) {
+        if (studentDetails['studentId'] != null) extraDetails['studentId'] = studentDetails['studentId'];
+        if (studentDetails['rollNo'] != null) extraDetails['rollNo'] = studentDetails['rollNo'];
+        if (studentDetails['regNo'] != null) extraDetails['regNo'] = studentDetails['regNo'];
+        if (studentDetails['department'] != null) extraDetails['department'] = studentDetails['department'];
+        if (studentDetails['semester'] != null) extraDetails['semester'] = studentDetails['semester'];
+        if (studentDetails['phoneNumber'] != null) extraDetails['phoneNumber'] = studentDetails['phoneNumber'];
+        if (studentDetails['phone'] != null) extraDetails['phone'] = studentDetails['phone'];
+        if (studentDetails['email'] != null) extraDetails['email'] = studentDetails['email'];
+        if (studentDetails['gender'] != null) extraDetails['gender'] = studentDetails['gender'];
+        if (studentDetails['genderPreference'] != null) extraDetails['genderPreference'] = studentDetails['genderPreference'];
+        if (studentDetails['profileImage'] != null) extraDetails['profileImage'] = studentDetails['profileImage'];
+        if (studentDetails['profileUrl'] != null) extraDetails['profileUrl'] = studentDetails['profileUrl'];
+        if (studentDetails['isVerified'] != null) extraDetails['isVerified'] = studentDetails['isVerified'];
+        if (studentDetails['isBlocked'] != null) extraDetails['isBlocked'] = studentDetails['isBlocked'];
+        if (studentDetails['status'] != null) extraDetails['status'] = studentDetails['status'];
+      }
+
+      await SOSService().sendSOS(
+        userId: widget.userId,
+        userName: widget.userName,
+        lat: widget.lat,
+        lng: widget.lng,
+        message: message,
+        extraDetails: extraDetails,
+      );
+
+      if (mounted) {
+        Navigator.pop(context);
+        NotificationService.show(
+          title: "SOS Triggered",
+          message: "Emergency alert sent to university admin.",
+          type: NotificationType.error,
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send SOS: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    
+    return Container(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        margin: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(32),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 20,
+              offset: Offset(0, -5),
+            ),
+          ],
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Flashing Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.emergency_rounded, color: Colors.red, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'EMERGENCY SOS',
+                        style: GoogleFonts.poppins(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      _countdownTimer?.cancel();
+                      Navigator.pop(context);
+                    },
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              
+              if (_countdownTimer != null) ...[
+                // Countdown indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          value: _secondsRemaining / 5.0,
+                          strokeWidth: 3,
+                          valueColor: const AlwaysStoppedAnimation<Color>(Colors.amber),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Sending automatic SOS in $_secondsRemaining seconds...',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.amber[900],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+              ],
+              
+              Text(
+                'If possible, select a reason below for faster dispatch:',
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: Colors.grey[700],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // Presets Grid
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 2.2,
+                ),
+                itemCount: _presets.length,
+                itemBuilder: (context, index) {
+                  final preset = _presets[index];
+                  final label = preset['label'] as String;
+                  final icon = preset['icon'] as IconData;
+                  final color = preset['color'] as Color;
+                  final msg = preset['message'] as String;
+                  
+                  return InkWell(
+                    onTap: () => _sendAlert(msg),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: color.withOpacity(0.2), width: 1.5),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(icon, color: color, size: 24),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              label,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: color,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+              
+              // Custom Text Field
+              TextField(
+                controller: _customReasonController,
+                decoration: InputDecoration(
+                  hintText: 'Or type custom emergency reason here...',
+                  hintStyle: GoogleFonts.poppins(fontSize: 12),
+                  filled: true,
+                  fillColor: Colors.grey[50],
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.send_rounded, color: Colors.red),
+                    onPressed: () {
+                      final val = _customReasonController.text.trim();
+                      if (val.isNotEmpty) {
+                        _sendAlert('Custom SOS: $val');
+                      } else {
+                        _sendAlert('General Panic SOS triggered.');
+                      }
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Instant SOS Button
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => _sendAlert('General Panic SOS triggered.'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: Text(
+                        'INSTANT SOS',
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

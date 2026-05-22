@@ -10,10 +10,11 @@ class SOSService {
     required double lat,
     required double lng,
     required String message,
+    Map<String, dynamic>? extraDetails,
   }) async {
     try {
       final String alertId = _dbRef.push().key!;
-      await _dbRef.child(alertId).set({
+      final Map<String, dynamic> payload = {
         'userId': userId,
         'userName': userName,
         'latitude': lat,
@@ -21,7 +22,11 @@ class SOSService {
         'message': message,
         'timestamp': ServerValue.timestamp,
         'status': 'active',
-      });
+      };
+      if (extraDetails != null) {
+        payload.addAll(extraDetails);
+      }
+      await _dbRef.child(alertId).set(payload);
       AppLogger.info("SOS Alert Sent: $alertId");
     } catch (e) {
       AppLogger.error("Failed to send SOS: $e");

@@ -135,16 +135,56 @@ class RouteNotifier extends Notifier<RouteState> {
   }
 
   void _calculatePoints(String routeName) {
+    // 1. Try direct match
     final firebasePoints = state.manualRoutes[routeName];
     final localPoints = CustomRoutes.getRoutePoints(routeName);
 
     if (firebasePoints != null && firebasePoints.isNotEmpty) {
       state = state.copyWith(routePoints: firebasePoints);
+      return;
     } else if (localPoints.isNotEmpty && localPoints.length > 2) {
       state = state.copyWith(routePoints: localPoints);
-    } else {
-      state = state.copyWith(routePoints: []);
+      return;
     }
+
+    // 2. Try reversed match
+    final parts = _splitRouteName(routeName);
+    if (parts.length == 2) {
+      final from = parts[0];
+      final to = parts[1];
+      final reversedKeys = [
+        "$to ➔ $from",
+        "$to -> $from",
+        "$to → $from",
+      ];
+
+      for (final revKey in reversedKeys) {
+        final revFbPoints = state.manualRoutes[revKey];
+        if (revFbPoints != null && revFbPoints.isNotEmpty) {
+          state = state.copyWith(routePoints: revFbPoints.reversed.toList());
+          return;
+        }
+
+        final revLocalPoints = CustomRoutes.getRoutePoints(revKey);
+        if (revLocalPoints.isNotEmpty && revLocalPoints.length > 2) {
+          state = state.copyWith(routePoints: revLocalPoints.reversed.toList());
+          return;
+        }
+      }
+    }
+
+    state = state.copyWith(routePoints: []);
+  }
+
+  List<String> _splitRouteName(String routeName) {
+    if (routeName.contains('➔')) {
+      return routeName.split('➔').map((s) => s.trim()).toList();
+    } else if (routeName.contains('->')) {
+      return routeName.split('->').map((s) => s.trim()).toList();
+    } else if (routeName.contains('→')) {
+      return routeName.split('→').map((s) => s.trim()).toList();
+    }
+    return [];
   }
 }
 

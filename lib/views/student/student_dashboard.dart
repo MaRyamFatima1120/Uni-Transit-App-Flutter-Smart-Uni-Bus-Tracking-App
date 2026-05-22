@@ -10,6 +10,7 @@ import 'package:uni_transit/core/routes/app_routes.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:uni_transit/view_models/auth_provider.dart';
 import 'package:uni_transit/services/notification_service.dart';
+import 'package:uni_transit/views/common/sos_review_bottom_sheet.dart';
 
 import 'map_screen.dart';
 import 'schedule_screen.dart';
@@ -42,6 +43,48 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
     // Mark student as Online when they open the app
     _updateStatus('Online');
     _listenForPushNotifications();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkForPendingSosReviews();
+    });
+  }
+
+  Future<void> _checkForPendingSosReviews() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('notifications')
+          .where('type', isEqualTo: 'sos_resolved')
+          .get();
+
+      final unreviewedDocs = snapshot.docs.where((doc) {
+        final data = doc.data();
+        return data['isReviewed'] != true && data['alertId'] != null;
+      }).toList();
+
+      if (unreviewedDocs.isNotEmpty && mounted) {
+        final doc = unreviewedDocs.first;
+        final data = doc.data();
+        final alertId = data['alertId'].toString();
+        final message = data['message'] ?? 'SOS Alert Resolved';
+
+        showModalBottomSheet(
+          context: context,
+          isScrollControlled: true,
+          backgroundColor: Colors.transparent,
+          builder: (context) => SosReviewBottomSheet(
+            notificationId: doc.id,
+            alertId: alertId,
+            alertMessage: message,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint("Error checking for pending SOS reviews: $e");
+    }
   }
 
   void _listenForPushNotifications() {
@@ -74,6 +117,24 @@ class _StudentDashboardState extends ConsumerState<StudentDashboard> {
               message: message,
               type: NotificationType.info,
             );
+
+            // Pop up review dialog directly if this is an SOS resolution alert
+            if (data['type'] == 'sos_resolved' && data['alertId'] != null && data['isReviewed'] != true) {
+              Future.delayed(const Duration(milliseconds: 1000), () {
+                if (mounted) {
+                  showModalBottomSheet(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) => SosReviewBottomSheet(
+                      notificationId: change.doc.id,
+                      alertId: data['alertId'].toString(),
+                      alertMessage: message,
+                    ),
+                  );
+                }
+              });
+            }
           }
         }
       }

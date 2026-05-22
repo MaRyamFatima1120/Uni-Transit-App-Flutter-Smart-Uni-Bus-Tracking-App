@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum NotificationType { support, alert, success, warning, info }
+enum NotificationType { support, alert, success, warning, info, sosResolved }
 
 class SystemNotificationModel {
   final String id;
@@ -10,6 +10,8 @@ class SystemNotificationModel {
   final NotificationType type;
   final bool isRead;
   final String? targetRole; // 'Student', 'Driver', or 'All'
+  final String? alertId;
+  final bool isReviewed;
 
   SystemNotificationModel({
     required this.id,
@@ -19,6 +21,8 @@ class SystemNotificationModel {
     required this.type,
     this.isRead = false,
     this.targetRole = 'All',
+    this.alertId,
+    this.isReviewed = false,
   });
 
   factory SystemNotificationModel.fromMap(Map<String, dynamic> map, String id) {
@@ -32,6 +36,8 @@ class SystemNotificationModel {
       type: _parseType(map['type']),
       isRead: map['isRead'] ?? false,
       targetRole: map['targetRole'] ?? 'All',
+      alertId: map['alertId'],
+      isReviewed: map['isReviewed'] ?? false,
     );
   }
 
@@ -41,6 +47,7 @@ class SystemNotificationModel {
       case 'success': return NotificationType.success;
       case 'warning': return NotificationType.warning;
       case 'support': return NotificationType.support;
+      case 'sos_resolved': return NotificationType.sosResolved;
       default: return NotificationType.info;
     }
   }
@@ -51,6 +58,7 @@ class SystemNotificationModel {
       case NotificationType.success: return Colors.green;
       case NotificationType.warning: return Colors.orange;
       case NotificationType.support: return Colors.blue;
+      case NotificationType.sosResolved: return Colors.green;
       case NotificationType.info: return const Color(0xFF0A1D56); // primaryNavy
     }
   }
@@ -61,6 +69,7 @@ class SystemNotificationModel {
       case NotificationType.success: return Icons.check_circle_outline;
       case NotificationType.warning: return Icons.warning_amber_rounded;
       case NotificationType.support: return Icons.help_outline;
+      case NotificationType.sosResolved: return Icons.rate_review_outlined;
       case NotificationType.info: return Icons.notifications_none_rounded;
     }
   }

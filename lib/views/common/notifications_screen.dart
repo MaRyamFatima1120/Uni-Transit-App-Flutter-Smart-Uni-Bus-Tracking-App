@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/models/notification_model.dart';
 import 'package:uni_transit/widgets/custom_app_bar.dart';
+import 'package:uni_transit/views/common/sos_review_bottom_sheet.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -164,6 +165,57 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                           color: isDark ? Colors.white70 : Colors.blueGrey[800],
                         ),
                       ),
+                      if (notification.type == NotificationType.sosResolved && notification.alertId != null) ...[
+                        const SizedBox(height: 12),
+                        notification.isReviewed
+                            ? Row(
+                                children: [
+                                  const Icon(Icons.check_circle_rounded, color: Colors.green, size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Reviewed successfully',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.green,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            : SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    showModalBottomSheet(
+                                      context: context,
+                                      isScrollControlled: true,
+                                      backgroundColor: Colors.transparent,
+                                      builder: (context) => SosReviewBottomSheet(
+                                        notificationId: notification.id,
+                                        alertId: notification.alertId!,
+                                        alertMessage: notification.message,
+                                      ),
+                                    );
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.primaryYellow,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                                  ),
+                                  icon: const Icon(Icons.rate_review_rounded, size: 16),
+                                  label: Text(
+                                    'Rate Emergency Assistance Service',
+                                    style: GoogleFonts.poppins(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                      ],
                     ],
                   ),
                 ),
