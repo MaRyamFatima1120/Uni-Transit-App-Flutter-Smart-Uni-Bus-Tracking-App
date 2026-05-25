@@ -71,8 +71,8 @@ class MyApp extends ConsumerWidget {
     ThemeData darkTheme = AppTheme.lightTheme;
     String title = 'Uni-Transit';
 
-    if (appInfoAsync.hasValue) {
-      final appInfo = appInfoAsync.value!;
+    final appInfo = appInfoAsync.value;
+    if (appInfo != null) {
       title = appInfo.appName;
       theme = AppTheme.createTheme(
         primaryHex: appInfo.primaryColor,

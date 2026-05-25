@@ -12,6 +12,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:uni_transit/widgets/driver_drawer.dart';
 import 'package:uni_transit/view_models/driver_trip_provider.dart';
 import 'package:uni_transit/view_models/bus_provider.dart';
+import 'package:uni_transit/view_models/schedule_provider.dart';
 import 'package:uni_transit/core/routes/app_routes.dart';
 import 'package:uni_transit/services/sos_service.dart';
 import 'package:uni_transit/services/notification_service.dart';
@@ -168,6 +169,47 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
     } catch (_) {}
   }
 
+  void _animatedMapMove(LatLng destLocation, double destZoom) {
+    final latTween = Tween<double>(
+      begin: _mapController.camera.center.latitude,
+      end: destLocation.latitude,
+    );
+    final lngTween = Tween<double>(
+      begin: _mapController.camera.center.longitude,
+      end: destLocation.longitude,
+    );
+    final zoomTween = Tween<double>(
+      begin: _mapController.camera.zoom,
+      end: destZoom,
+    );
+
+    final controller = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    final animation = CurvedAnimation(
+      parent: controller,
+      curve: Curves.fastOutSlowIn,
+    );
+
+    controller.addListener(() {
+      if (mounted) {
+        _mapController.move(
+          LatLng(latTween.evaluate(animation), lngTween.evaluate(animation)),
+          zoomTween.evaluate(animation),
+        );
+      }
+    });
+
+    animation.addStatusListener((status) {
+      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+        controller.dispose();
+      }
+    });
+
+    controller.forward();
+  }
+
   Future<void> _initLocationTracking() async {
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) return;
@@ -204,12 +246,40 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
     if (user == null) return;
 
     final tripState = ref.read(driverTripProvider);
+
+    // Guard: if trip not started yet, validate all fields first
     if (!tripState.isTripStarted) {
+      // Update bus/plate from controllers
       ref.read(driverTripProvider.notifier).updateInputs(
         bus: _busNumberController.text.trim(),
         plate: _plateNumberController.text.trim(),
       );
+
+      // Re-read state after updateInputs
+      final updated = ref.read(driverTripProvider);
+
+      // Check if route is selected
+      if (updated.from == null || updated.to == null) {
+        // Safe fallback in case they still somehow trigger this
+        NotificationService.show(
+          title: "No Route Selected",
+          message: "Please select your assigned route first.",
+          type: NotificationType.warning,
+        );
+        return;
+      }
+
+      // Check if bus number is present
+      if (updated.busNumber.trim().isEmpty) {
+        NotificationService.show(
+          title: "Bus Number Missing",
+          message: "Please select your assigned route first — it will auto-fill your bus number.",
+          type: NotificationType.warning,
+        );
+        return;
+      }
     }
+
     await ref.read(driverTripProvider.notifier).toggleTrip(user.uid, user.displayName ?? "Driver");
   }
 
@@ -231,6 +301,342 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
         },
       );
     }
+  }
+  bool _hasShownUpcomingTripPrompt = false;
+
+  bool _isTimePassed(String timeStr) {
+    if (timeStr.isEmpty || timeStr.toLowerCase() == 'pending') return false;
+    final now = DateTime.now();
+    try {
+      int hour = 0;
+      int minute = 0;
+
+      final isPM = timeStr.toLowerCase().contains('pm');
+      final isAM = timeStr.toLowerCase().contains('am');
+      
+      final cleanTime = timeStr.replaceAll(RegExp(r'[^0-9:]'), '');
+      final parts = cleanTime.split(':');
+      if (parts.length >= 2) {
+        hour = int.tryParse(parts[0]) ?? 0;
+        minute = int.tryParse(parts[1]) ?? 0;
+        
+        if (isPM && hour < 12) hour += 12;
+        if (isAM && hour == 12) hour = 0;
+        
+        final scheduleTime = DateTime(now.year, now.month, now.day, hour, minute);
+        // If it's more than 30 minutes past the scheduled departure, don't show it as upcoming
+        return now.isAfter(scheduleTime.add(const Duration(minutes: 30)));
+      }
+    } catch (e) {
+      debugPrint("Error parsing time: $e");
+    }
+    return false;
+  }
+
+  void _checkAndShowUpcomingTripPrompt(Map<String, dynamic>? driverData, dynamic allSchedules) {
+    if (driverData == null || allSchedules == null) return;
+    
+    // Cast appropriately since we didn't import the model explicitly everywhere
+    final List<dynamic> schedules = allSchedules as List<dynamic>;
+    if (schedules.isEmpty) return;
+
+    final assignedBus = (driverData['assignedBus']?.toString() ?? '').trim();
+    final rawRoutes = driverData['assignedRoutes'];
+    final List<dynamic> assignedRoutesList = rawRoutes is List ? rawRoutes : [];
+
+    if (assignedBus.isEmpty && assignedRoutesList.isEmpty) return;
+
+    final matchingSchedules = schedules.where((s) {
+      // 1. Match by Route ID or Route Name
+      if (assignedRoutesList.isNotEmpty) {
+        if (assignedRoutesList.contains(s.id)) return true;
+        if (assignedRoutesList.any((r) => r.toString().toLowerCase().trim() == s.route.toLowerCase().trim())) {
+          return true;
+        }
+      }
+
+      // 2. Match by Bus Number
+      if (assignedBus.isNotEmpty) {
+        final sBus = s.busNumber.toLowerCase().trim();
+        final dBus = assignedBus.toLowerCase().trim();
+        if (sBus == dBus) return true;
+        final parts = sBus.split(',').map((e) => e.trim()).toList();
+        if (parts.contains(dBus)) return true;
+        if (sBus.contains(dBus) || dBus.contains(sBus)) return true;
+        
+        final sBusNum = RegExp(r'\d+').firstMatch(sBus)?.group(0);
+        final dBusNum = RegExp(r'\d+').firstMatch(dBus)?.group(0);
+        if (sBusNum != null && dBusNum != null && sBusNum == dBusNum) return true;
+      }
+      return false;
+    }).toList();
+
+    if (matchingSchedules.isEmpty) return;
+
+    final now = DateTime.now();
+    final selectedDateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+    final weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    final selectedDayName = weekdays[now.weekday - 1];
+
+    final todaySchedules = matchingSchedules.where((schedule) {
+      bool isToday = false;
+      if (schedule.date != null && schedule.date!.isNotEmpty) {
+        isToday = schedule.date == selectedDateStr;
+      } else if (schedule.operatingDays != null && schedule.operatingDays!.isNotEmpty) {
+        isToday = schedule.operatingDays!.any((day) => 
+          day.toLowerCase().trim() == selectedDayName.toLowerCase()
+        );
+      } else {
+        isToday = selectedDayName != 'Saturday' && selectedDayName != 'Sunday';
+      }
+
+      if (!isToday) return false;
+
+      // Check if time has already passed
+      final depTime = schedule.departureTime?.toString() ?? '';
+      if (_isTimePassed(depTime)) return false;
+
+      return true;
+    }).toList();
+
+    if (todaySchedules.isEmpty) return;
+
+    _hasShownUpcomingTripPrompt = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) => _buildUpcomingTripBottomSheet(
+          context, 
+          todaySchedules.first,
+          assignedBus: assignedBus,  // pass driver's actual assigned bus
+        ),
+      );
+    });
+  }
+
+  Widget _buildUpcomingTripBottomSheet(
+    BuildContext context, 
+    dynamic schedule, {
+    String assignedBus = '',
+  }) {
+    String from = CampusLocations.abbasiaName;
+    String to = CampusLocations.baghdadName;
+    final routeStr = schedule.route ?? '';
+    
+    if (routeStr.contains('➔')) {
+      final parts = routeStr.split('➔');
+      if (parts.length >= 2) {
+        from = parts[0].trim();
+        to = parts[1].trim();
+      }
+    } else if (routeStr.contains('->')) {
+      final parts = routeStr.split('->');
+      if (parts.length >= 2) {
+        from = parts[0].trim();
+        to = parts[1].trim();
+      }
+    } else if (routeStr.toLowerCase().contains(' to ')) {
+      final match = RegExp(r'\s+to\s+', caseSensitive: false);
+      final parts = routeStr.split(match);
+      if (parts.length >= 2) {
+        from = parts[0].trim();
+        to = parts[1].trim();
+      }
+    }
+
+    String mappedGender = "Combined";
+    final type = schedule.type.toString().toLowerCase();
+    if (type.contains("girls")) {
+      mappedGender = "Girls";
+    } else if (type.contains("boys")) {
+      mappedGender = "Boys";
+    }
+
+    // Resolve bus number: prefer driver's assigned bus over schedule's busNumber
+    // Schedule busNumber can be 'TBA', empty, or incorrect
+    final schedBus = schedule.busNumber?.toString().trim() ?? '';
+    final resolvedBus = (assignedBus.isNotEmpty && assignedBus.toLowerCase() != 'tba')
+        ? assignedBus
+        : (schedBus.isNotEmpty && schedBus.toLowerCase() != 'tba' ? schedBus : 'Not Assigned');
+
+    // Validate departure time — reject junk values like 'Live', 'Restored', etc.
+    final rawTime = schedule.departureTime?.toString().trim() ?? '';
+    final timeIsValid = rawTime.isNotEmpty &&
+        rawTime.toLowerCase() != 'pending' &&
+        rawTime.toLowerCase() != 'live' &&
+        rawTime.toLowerCase() != 'restored' &&
+        rawTime.toLowerCase() != 'calculating...' &&
+        rawTime.toLowerCase() != 'tba';
+    final displayTime = timeIsValid ? rawTime : 'Pending';
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Handle bar
+          Container(
+            width: 40, height: 5,
+            decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10)),
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.red.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.directions_bus_rounded, size: 48, color: Colors.red),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "UPCOMING TRIP ALERT",
+            style: GoogleFonts.poppins(
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+              color: Colors.red.shade700,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "You have an assigned route today.\nAre you ready to commence tracking?",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: Colors.grey.shade600,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 24),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.primaryNavy.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.primaryNavy.withValues(alpha: 0.15)),
+            ),
+            child: Column(
+              children: [
+                _buildInfoRow(
+                  icon: Icons.access_time_filled_rounded,
+                  label: "Departure Time",
+                  value: displayTime,
+                  valueColor: displayTime == 'Pending' ? Colors.orange.shade700 : AppColors.primaryNavy,
+                ),
+                const Divider(height: 20),
+                _buildInfoRow(
+                  icon: Icons.route_rounded,
+                  label: "Route",
+                  value: "$from → $to",
+                ),
+                const Divider(height: 20),
+                _buildInfoRow(
+                  icon: Icons.directions_bus_rounded,
+                  label: "Bus Number",
+                  value: resolvedBus,
+                  valueColor: resolvedBus == 'Not Assigned' ? Colors.orange.shade700 : AppColors.primaryNavy,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: Text(
+                    "LATER",
+                    style: GoogleFonts.poppins(
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  onPressed: () {
+                    // Set state BEFORE popping to avoid race condition
+                    ref.read(driverTripProvider.notifier).updateInputs(
+                      from: from,
+                      to: to,
+                      bus: resolvedBus,
+                      gender: mappedGender,
+                      departureTime: displayTime,
+                    );
+                    Navigator.pop(context);
+                    NotificationService.show(
+                      title: "Route Selected",
+                      message: "$from → $to${displayTime != 'Pending' ? ' · $displayTime' : ''}",
+                      type: NotificationType.success,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primaryNavy,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  child: Text(
+                    "PREPARE ROUTE",
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Helper row for the upcoming trip info card
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    Color? valueColor,
+  }) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppColors.primaryNavy.withValues(alpha: 0.6)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(color: Colors.grey.shade600, fontSize: 12),
+          ),
+        ),
+        Text(
+          value,
+          style: GoogleFonts.poppins(
+            fontWeight: FontWeight.bold,
+            fontSize: 13,
+            color: valueColor ?? AppColors.primaryNavy,
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -283,9 +689,49 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
       if (previous == null || previous.plateNumber != next.plateNumber) {
         _plateNumberController.text = next.plateNumber;
       }
+
+      // ⚡ When trip starts (commences), animate the map camera to the start location of the route!
+      if (next.isTripStarted && previous != null && !previous.isTripStarted) {
+        final startLatLng = next.routePoints.isNotEmpty 
+            ? next.routePoints.first 
+            : (next.from != null ? _getHubPos(next.from!) : next.currentLocation);
+        
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _animatedMapMove(startLatLng, 16.5);
+        });
+      } else if (next.routePoints.isNotEmpty && 
+          (previous == null || previous.routePoints != next.routePoints)) {
+        // ⚡ Auto-zoom and Fit bounds to Route Points if route has changed or selected (only when trip is NOT started)
+        if (!next.isTripStarted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            final bounds = LatLngBounds.fromPoints(next.routePoints);
+            _mapController.fitCamera(
+              CameraFit.bounds(
+                bounds: bounds, 
+                padding: const EdgeInsets.only(top: 80, bottom: 280, left: 50, right: 50),
+              ),
+            );
+          });
+        }
+      }
+
+      // Center back to driver location when trip/route is terminated/cleared
+      if (next.routePoints.isEmpty && previous != null && previous.routePoints.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _animatedMapMove(next.currentLocation, 15.0);
+        });
+      }
     });
 
     final tripState = ref.watch(driverTripProvider);
+    final driverProfileAsync = ref.watch(driverDataStreamProvider);
+    final schedulesAsync = ref.watch(schedulesStreamProvider);
+
+    if (!_hasShownUpcomingTripPrompt && tripState.hasRestored && !tripState.isTripStarted) {
+      if (driverProfileAsync.hasValue && schedulesAsync.hasValue) {
+        _checkAndShowUpcomingTripPrompt(driverProfileAsync.value, schedulesAsync.value);
+      }
+    }
 
     debugPrint("DriverDashboard: building with tripState: "
         "isTripStarted=${tripState.isTripStarted}, "
@@ -332,10 +778,10 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                       borderColor: const Color(0xFFE8EAF6),
                     ),
                   ]),
-                if (tripState.isTripStarted && tripState.to != null)
+                if (tripState.to != null)
                   MarkerLayer(markers: [
                     Marker(
-                      point: _getHubPos(tripState.to!), 
+                      point: tripState.routePoints.isNotEmpty ? tripState.routePoints.last : _getHubPos(tripState.to!), 
                       width: 100, height: 120, 
                       child: FittedBox(
                         fit: BoxFit.scaleDown,
@@ -344,7 +790,7 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                     ),
                     if (tripState.from != null)
                       Marker(
-                        point: _getHubPos(tripState.from!), 
+                        point: tripState.routePoints.isNotEmpty ? tripState.routePoints.first : _getHubPos(tripState.from!), 
                         width: 100, height: 120, 
                         child: FittedBox(
                           fit: BoxFit.scaleDown,
@@ -385,7 +831,6 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                 ),
               ],
             ),
-            if (tripState.isTripStarted) Positioned(top: 50, left: 20, right: 20, child: _buildNavigationBanner(tripState)),
             Positioned(top: 40, left: 20, child: Builder(builder: (context) => _buildCircleButton(Icons.menu, () => Scaffold.of(context).openDrawer()))),
             Positioned(
               top: 40,
@@ -468,55 +913,106 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
             ),
 
             // ⚡ PROFESSIONAL: Draggable Bottom Sheet
-            DraggableScrollableSheet(
-              initialChildSize: tripState.isTripStarted ? 0.35 : 0.6,
-              minChildSize: 0.15,
-              maxChildSize: 0.85,
-              builder: (context, scrollController) {
-                return Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
-                    boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 20)],
-                  ),
-                  child: SingleChildScrollView(
-                    controller: scrollController,
-                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Handle
-                        Container(
-                          width: 40, 
-                          height: 5, 
-                          decoration: BoxDecoration(
-                            color: Colors.grey[300], 
-                            borderRadius: BorderRadius.circular(10)
-                          )
-                        ),
-                        const SizedBox(height: 16),
-                        
-                        if (!tripState.isTripStarted) 
-                          _buildConfigUI(tripState) 
-                        else 
-                          _buildActiveTripStatus(tripState),
-                        
-                        const SizedBox(height: 24),
+            Consumer(
+              builder: (context, ref, child) {
+                final bool hasRoute = tripState.from != null && 
+                                      tripState.to != null && 
+                                      tripState.busNumber.isNotEmpty;
+
+                final double initialSize;
+                final double maxSize;
+
+                if (tripState.isTripStarted) {
+                  initialSize = 0.32;
+                  maxSize = 0.5;
+                } else if (!hasRoute) {
+                  initialSize = 0.32; // Tight and compact size if no route is selected
+                  maxSize = 0.45;
+                } else {
+                  initialSize = 0.45; // Moderate size showing selected route details
+                  maxSize = 0.65;
+                }
+
+                return DraggableScrollableSheet(
+                  initialChildSize: initialSize,
+                  minChildSize: 0.15,
+                  maxChildSize: maxSize,
+                  builder: (context, scrollController) {
+                    return Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+                        boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 20)],
+                      ),
+                      child: SingleChildScrollView(
+                        controller: scrollController,
+                        padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Handle
+                            Container(
+                              width: 40, 
+                              height: 5, 
+                              decoration: BoxDecoration(
+                                color: Colors.grey[300], 
+                                borderRadius: BorderRadius.circular(10)
+                              )
+                            ),
+                            const SizedBox(height: 12),
+                            
+                            if (!tripState.isTripStarted) 
+                              _buildConfigUI(tripState) 
+                            else 
+                              _buildActiveTripStatus(tripState),
+                            
+                            const SizedBox(height: 16),
                         
                         SizedBox(
                           width: double.infinity, 
                           height: 56,
-                          child: ElevatedButton(
-                            onPressed: _onToggle,
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: tripState.isTripStarted ? Colors.red : AppColors.primaryNavy, 
-                              foregroundColor: Colors.white, 
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
-                            ),
-                            child: Text(
-                              tripState.isTripStarted ? "TERMINATE TRIP" : "COMMENCE TRACKING", 
-                              style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)
-                            ),
+                          child: Consumer(
+                            builder: (context, ref, child) {
+                              final bool hasRoute = tripState.from != null && 
+                                                    tripState.to != null && 
+                                                    tripState.busNumber.isNotEmpty;
+                              
+                              final String buttonText;
+                              final Color buttonColor;
+                              final VoidCallback buttonAction;
+
+                              if (tripState.isTripStarted) {
+                                buttonText = "TERMINATE TRIP";
+                                buttonColor = Colors.red;
+                                buttonAction = _onToggle;
+                              } else if (!hasRoute) {
+                                buttonText = "SELECT ROUTE TO START";
+                                buttonColor = AppColors.primaryNavy;
+                                buttonAction = () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(builder: (context) => const AssignedRoutesScreen()),
+                                  );
+                                };
+                              } else {
+                                buttonText = "COMMENCE TRACKING";
+                                buttonColor = AppColors.primaryNavy;
+                                buttonAction = _onToggle;
+                              }
+
+                              return ElevatedButton(
+                                onPressed: buttonAction,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: buttonColor, 
+                                  foregroundColor: Colors.white, 
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))
+                                ),
+                                child: Text(
+                                  buttonText, 
+                                  style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2)
+                                ),
+                              );
+                            }
                           ),
                         ),
                       ],
@@ -524,10 +1020,12 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                   ),
                 );
               },
-            ),
-          ],
+            );
+          },
         ),
-      );
+      ],
+    ),
+  );
     } catch (e, stack) {
       debugPrint("CRITICAL: DriverDashboard build error captured: $e\n$stack");
       return Scaffold(
@@ -728,44 +1226,125 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
     final bool hasSelectedRoute = state.from != null && state.to != null && state.busNumber.isNotEmpty;
 
     if (!hasSelectedRoute) {
-      return Column(
-        children: [
-          Icon(Icons.route_rounded, size: 48, color: AppColors.primaryNavy.withOpacity(0.3)),
-          const SizedBox(height: 12),
-          Text(
-            "NO ACTIVE ROUTE SELECTED",
-            style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            "Please select one of your assigned routes for today to commence tracking.",
-            textAlign: TextAlign.center,
-            style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[500]),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            height: 48,
-            child: OutlinedButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const AssignedRoutesScreen()),
-                );
-              },
-              icon: const Icon(Icons.calendar_month_rounded, size: 18),
-              label: Text(
-                "SELECT ASSIGNED ROUTE",
-                style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 12),
+      return Consumer(
+        builder: (context, ref, child) {
+          final driverProfileAsync = ref.watch(driverDataStreamProvider);
+          final schedulesAsync = ref.watch(schedulesStreamProvider);
+
+          int todayRoutesCount = 0;
+          
+          if (driverProfileAsync.hasValue && schedulesAsync.hasValue) {
+            final driverData = driverProfileAsync.value;
+            final allSchedules = schedulesAsync.value ?? [];
+            if (driverData != null) {
+              final assignedBus = (driverData['assignedBus']?.toString() ?? '').trim();
+              final rawRoutes = driverData['assignedRoutes'];
+              final List<dynamic> assignedRoutesList = rawRoutes is List ? rawRoutes : [];
+
+              final matchingSchedules = allSchedules.where((s) {
+                // 1. Match by Route ID or Route Name
+                if (assignedRoutesList.isNotEmpty) {
+                  if (assignedRoutesList.contains(s.id)) return true;
+                  if (assignedRoutesList.any((r) => r.toString().toLowerCase().trim() == s.route.toLowerCase().trim())) {
+                    return true;
+                  }
+                }
+
+                // 2. Match by Bus Number
+                if (assignedBus.isNotEmpty) {
+                  final sBus = s.busNumber.toLowerCase().trim();
+                  final dBus = assignedBus.toLowerCase().trim();
+                  if (sBus == dBus) return true;
+                  final parts = sBus.split(',').map((e) => e.trim()).toList();
+                  if (parts.contains(dBus)) return true;
+                  if (sBus.contains(dBus) || dBus.contains(sBus)) return true;
+
+                  final sBusNum = RegExp(r'\d+').firstMatch(sBus)?.group(0);
+                  final dBusNum = RegExp(r'\d+').firstMatch(dBus)?.group(0);
+                  if (sBusNum != null && dBusNum != null && sBusNum == dBusNum) return true;
+                }
+                return false;
+              }).toList();
+
+              final now = DateTime.now();
+              final selectedDateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+              final weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+              final selectedDayName = weekdays[now.weekday - 1];
+
+              todayRoutesCount = matchingSchedules.where((schedule) {
+                if (schedule.date != null && schedule.date!.isNotEmpty) {
+                  return schedule.date == selectedDateStr;
+                }
+                if (schedule.operatingDays != null && schedule.operatingDays!.isNotEmpty) {
+                  return schedule.operatingDays!.any((day) => 
+                    day.toLowerCase().trim() == selectedDayName.toLowerCase()
+                  );
+                }
+                return selectedDayName != 'Saturday' && selectedDayName != 'Sunday';
+              }).length;
+            }
+          }
+
+          return Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (todayRoutesCount > 0) ...[
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0.8, end: 1.0),
+                  duration: const Duration(milliseconds: 800),
+                  curve: Curves.easeInOut,
+                  builder: (context, value, child) {
+                    return Transform.scale(
+                      scale: value,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.warning_rounded, color: Colors.red, size: 14),
+                            const SizedBox(width: 6),
+                            Text(
+                              "YOU HAVE $todayRoutesCount SCHEDULED ROUTE${todayRoutesCount > 1 ? 'S' : ''} TODAY",
+                              style: GoogleFonts.poppins(color: Colors.red, fontSize: 9, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+              ],
+              Icon(Icons.route_rounded, size: 38, color: AppColors.primaryNavy.withValues(alpha: 0.25)),
+              const SizedBox(height: 8),
+              Text(
+                "NO ACTIVE ROUTE SELECTED",
+                style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryNavy),
               ),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primaryNavy,
-                side: const BorderSide(color: AppColors.primaryNavy),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  todayRoutesCount > 0 
+                    ? "It is time for your shift! Tap below to select your route and commence tracking."
+                    : "Please select one of your assigned routes to commence tracking.",
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.poppins(
+                    fontSize: 10.5, 
+                    color: todayRoutesCount > 0 ? Colors.red.shade400 : Colors.grey[500],
+                    fontWeight: todayRoutesCount > 0 ? FontWeight.w600 : FontWeight.normal,
+                    height: 1.4,
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        }
       );
     }
 
@@ -807,6 +1386,7 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
           ),
           child: Column(
             children: [
+              // Bus Number row
               Row(
                 children: [
                   const Icon(Icons.directions_bus_rounded, color: AppColors.primaryNavy, size: 20),
@@ -826,7 +1406,7 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: AppColors.primaryYellow.withOpacity(0.2),
+                      color: AppColors.primaryYellow.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
@@ -837,6 +1417,7 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                 ],
               ),
               const Divider(height: 20),
+              // Route row
               Row(
                 children: [
                   const Icon(Icons.route, color: AppColors.primaryNavy, size: 20),
@@ -855,6 +1436,40 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                   ),
                 ],
               ),
+              // Departure time row — only show if we have a time
+              if (state.departureTime.isNotEmpty) ...[
+                const Divider(height: 20),
+                Row(
+                  children: [
+                    const Icon(Icons.access_time_filled_rounded, color: AppColors.primaryNavy, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text("DEPARTURE TIME", style: TextStyle(fontSize: 8, color: Colors.grey, fontWeight: FontWeight.bold)),
+                          Text(
+                            state.departureTime,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.primaryNavy),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                      ),
+                      child: Text(
+                        "SCHEDULED",
+                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.green.shade700),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
@@ -1150,7 +1765,7 @@ class _DriverSOSOptionsBottomSheetState extends State<_DriverSOSOptionsBottomShe
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.1),
+                          color: Colors.red.withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.emergency_rounded, color: Colors.red, size: 24),
@@ -1182,9 +1797,9 @@ class _DriverSOSOptionsBottomSheetState extends State<_DriverSOSOptionsBottomShe
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   decoration: BoxDecoration(
-                    color: Colors.amber.withOpacity(0.1),
+                    color: Colors.amber.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                    border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
                   ),
                   child: Row(
                     children: [
@@ -1248,9 +1863,9 @@ class _DriverSOSOptionsBottomSheetState extends State<_DriverSOSOptionsBottomShe
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.08),
+                        color: color.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: color.withOpacity(0.2), width: 1.5),
+                        border: Border.all(color: color.withValues(alpha: 0.2), width: 1.5),
                       ),
                       child: Row(
                         children: [

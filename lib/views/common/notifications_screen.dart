@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/models/notification_model.dart';
 import 'package:uni_transit/widgets/custom_app_bar.dart';
@@ -45,6 +46,65 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
+  Future<void> _deleteAllNotifications() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text("Clear All Notifications?", style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
+        content: const Text("Are you sure you want to permanently delete all notifications from your history?", style: TextStyle(fontSize: 13)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text("CANCEL", style: TextStyle(color: Colors.grey[600], fontWeight: FontWeight.bold)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text("DELETE ALL", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      try {
+        final docs = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .collection('notifications')
+            .get();
+
+        if (docs.docs.isNotEmpty) {
+          final batch = FirebaseFirestore.instance.batch();
+          for (var doc in docs.docs) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
+        }
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("All notifications cleared.")),
+          );
+        }
+      } catch (e) {
+        debugPrint("Error clearing notifications: $e");
+      }
+    }
+  }
+
+  void _showNotificationSettings() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => const _NotificationSettingsBottomSheet(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -53,9 +113,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       backgroundColor: Theme.of(context).brightness == Brightness.dark 
           ? const Color(0xFF0F172A) 
           : const Color(0xFFF8FAFC),
-      appBar: const CustomAppBar(
+      appBar: CustomAppBar(
         title: "NOTIFICATIONS",
         showBackArrow: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.delete_sweep_rounded),
+            tooltip: "Delete All",
+            onPressed: _deleteAllNotifications,
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_suggest_rounded),
+            tooltip: "Notification Options",
+            onPressed: _showNotificationSettings,
+          ),
+        ],
       ),
       body: user == null
           ? _buildEmptyState(context)
@@ -268,5 +340,209 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } else {
       return "${difference.inDays}d ago";
     }
+  }
+}
+
+class _NotificationSettingsBottomSheet extends StatefulWidget {
+  const _NotificationSettingsBottomSheet();
+
+  @override
+  State<_NotificationSettingsBottomSheet> createState() => _NotificationSettingsBottomSheetState();
+}
+
+class _NotificationSettingsBottomSheetState extends State<_NotificationSettingsBottomSheet> {
+  bool _inAppAlerts = true;
+  bool _localNotifications = true;
+  bool _vibrateSounds = true;
+  bool _emergencyOnly = false;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _inAppAlerts = prefs.getBool('pref_in_app_alerts') ?? true;
+      _localNotifications = prefs.getBool('pref_local_notifications') ?? true;
+      _vibrateSounds = prefs.getBool('pref_vibrate_sounds') ?? true;
+      _emergencyOnly = prefs.getBool('pref_emergency_only') ?? false;
+      _loading = false;
+    });
+  }
+
+  Future<void> _saveSetting(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
+      child: _loading 
+          ? const Center(child: Padding(
+              padding: EdgeInsets.all(32.0),
+              child: CircularProgressIndicator(),
+            ))
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Pull bar
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    const Icon(Icons.tune_rounded, color: AppColors.primaryNavy, size: 28),
+                    const SizedBox(width: 12),
+                    Text(
+                      "NOTIFICATION OPTIONS",
+                      style: GoogleFonts.poppins(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: isDark ? Colors.white : AppColors.primaryNavy,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  "Customize how and when you want to be notified about trips, SOS alerts, and fleet schedules.",
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: isDark ? Colors.white70 : Colors.grey[600],
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                const Divider(height: 1),
+                const SizedBox(height: 16),
+                _buildToggleRow(
+                  title: "In-App Alerts (Snackbars)",
+                  subtitle: "Show visual notifications at the bottom of the screen while using the app.",
+                  icon: Icons.featured_play_list_rounded,
+                  value: _inAppAlerts,
+                  onChanged: (val) {
+                    setState(() => _inAppAlerts = val);
+                    _saveSetting('pref_in_app_alerts', val);
+                  },
+                ),
+                const SizedBox(height: 20),
+                _buildToggleRow(
+                  title: "System Local Notifications",
+                  subtitle: "Receive banner notifications when the app is in the background or screen is locked.",
+                  icon: Icons.notifications_active_rounded,
+                  value: _localNotifications,
+                  onChanged: (val) {
+                    setState(() => _localNotifications = val);
+                    _saveSetting('pref_local_notifications', val);
+                  },
+                ),
+                const SizedBox(height: 20),
+                _buildToggleRow(
+                  title: "Vibrations & Audio Alerts",
+                  subtitle: "Vibrate your device and play sounds for incoming system alerts.",
+                  icon: Icons.vibration_rounded,
+                  value: _vibrateSounds,
+                  onChanged: (val) {
+                    setState(() => _vibrateSounds = val);
+                    _saveSetting('pref_vibrate_sounds', val);
+                  },
+                ),
+                const SizedBox(height: 20),
+                _buildToggleRow(
+                  title: "Critical & Emergency Only",
+                  subtitle: "Only trigger alerts for emergency SOS and active tracking updates.",
+                  icon: Icons.emergency_share_rounded,
+                  value: _emergencyOnly,
+                  onChanged: (val) {
+                    setState(() => _emergencyOnly = val);
+                    _saveSetting('pref_emergency_only', val);
+                  },
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildToggleRow({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: value 
+                ? AppColors.primaryNavy.withValues(alpha: 0.1) 
+                : Colors.grey.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            icon, 
+            color: value ? AppColors.primaryNavy : Colors.grey, 
+            size: 20,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: isDark ? Colors.white : AppColors.primaryNavy,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: isDark ? Colors.white54 : Colors.grey[600],
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Switch(
+          value: value,
+          onChanged: onChanged,
+          activeColor: AppColors.primaryNavy,
+        ),
+      ],
+    );
   }
 }
