@@ -36,12 +36,14 @@ class BusSchedule {
   factory BusSchedule.fromMap(String id, Map<String, dynamic> map) {
     return BusSchedule(
       id: id,
-      busNumber: map['busNumber'] ?? '',
+      busNumber: map['busNumber'] ?? map['bus_number'] ?? '',
       route: map['route'] ?? '',
-      departureTime: map['departureTime'] ?? '',
+      departureTime: map['departureTime'] ?? map['departure_time'] ?? '',
       stops: List<String>.from(map['stops'] ?? []),
       type: map['type'] ?? 'Combined',
-      operatingDays: map['operatingDays'] != null ? List<String>.from(map['operatingDays']) : null,
+      operatingDays: map['operatingDays'] != null 
+          ? List<String>.from(map['operatingDays']) 
+          : (map['operating_days'] != null ? List<String>.from(map['operating_days']) : null),
       date: map['date'],
     );
   }

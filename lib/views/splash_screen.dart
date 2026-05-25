@@ -147,18 +147,28 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
+                          color: Colors.white, // Solid white so it blends with logo background
                           shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.1),
-                            width: 2,
-                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.2),
+                              blurRadius: 20,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
                         ),
-                        child: Hero(
-                          tag: 'app_logo',
-                          child: Image.asset(AppAssets.iubLogo, height: 140),
+                        child: ClipOval(
+                          child: Hero(
+                            tag: 'app_logo',
+                            child: Image.asset(
+                              AppAssets.iubLogo, 
+                              height: 130,
+                              width: 130,
+                              fit: BoxFit.cover, // Ensures the square image perfectly fills the circle
+                            ),
+                          ),
                         ),
                       ),
                       const SizedBox(height: 40),

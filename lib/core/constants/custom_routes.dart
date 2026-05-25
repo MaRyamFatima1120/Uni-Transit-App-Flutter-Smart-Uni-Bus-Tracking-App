@@ -106,6 +106,24 @@ class CustomRoutes {
 
   /// Helper to get points for a specific route
   static List<LatLng> getRoutePoints(String routeName) {
-    return manualPolylines[routeName] ?? [];
+    if (manualPolylines.containsKey(routeName)) {
+      return manualPolylines[routeName]!;
+    }
+    
+    // Attempt intelligent matching
+    final nameLower = routeName.toLowerCase();
+    
+    // Check if it's Baghdad to Abbasia (reverse of Abbasia -> Baghdad)
+    if (nameLower.contains('baghdad') && (nameLower.contains('abbasia') || nameLower.contains('abasia'))) {
+      if (nameLower.indexOf('baghdad') < nameLower.indexOf('aba')) {
+        // It's Baghdad -> Abbasia (Reversed)
+        return manualPolylines["Abbasia ➔ Baghdad"]?.reversed.toList() ?? [];
+      } else {
+        // It's Abbasia -> Baghdad (Forward)
+        return manualPolylines["Abbasia ➔ Baghdad"] ?? [];
+      }
+    }
+    
+    return [];
   }
 }

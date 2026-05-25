@@ -7,11 +7,73 @@ import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/core/constants/campus_locations.dart';
 import 'package:uni_transit/view_models/auth_provider.dart';
 import 'package:uni_transit/view_models/driver_trip_provider.dart';
-import 'package:uni_transit/models/bus_schedule.dart';
-import 'package:uni_transit/services/schedule_service.dart';
-
-class AssignedRoutesScreen extends ConsumerWidget {
+import 'package:uni_transit/view_models/schedule_provider.dart';
+import 'package:uni_transit/services/notification_service.dart';
+class AssignedRoutesScreen extends ConsumerStatefulWidget {
   const AssignedRoutesScreen({super.key});
+
+  @override
+  ConsumerState<AssignedRoutesScreen> createState() => _AssignedRoutesScreenState();
+}
+
+class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
+  late ScrollController _calendarScrollController;
+
+  final List<String> _weekdays = [
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _calendarScrollController = ScrollController();
+    
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (mounted) _scrollToSelectedDate();
+    });
+  }
+
+  @override
+  void dispose() {
+    _calendarScrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollToSelectedDate() {
+    if (!mounted || !_calendarScrollController.hasClients) return;
+    
+    final calendarState = ref.read(calendarProvider);
+    final index = calendarState.selectedDate.day - 1;
+    _calendarScrollController.animateTo(
+      index * 62.0, // Width of date cell (54) + margin (8)
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  List<DateTime> _generateDaysInMonth(DateTime month) {
+    final lastDayOfMonth = DateTime(month.year, month.month + 1, 0);
+    return List.generate(
+      lastDayOfMonth.day,
+      (index) => DateTime(month.year, month.month, index + 1),
+    );
+  }
+
+  String _getMonthName(DateTime date) {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    return months[date.month - 1];
+  }
+
+  String _getWeekdayName(DateTime date) {
+    return _weekdays[date.weekday - 1];
+  }
+
+  String _formatDate(DateTime date) {
+    return "${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}";
+  }
 
   LatLng _getCampusCoord(String campusName) {
     final nameLower = campusName.toLowerCase();
@@ -20,9 +82,21 @@ class AssignedRoutesScreen extends ConsumerWidget {
     } else if (nameLower.contains('abbasia') || nameLower.contains('old')) {
       return CampusLocations.abbasiaCampus;
     } else if (nameLower.contains('railway')) {
-      return const LatLng(29.3970, 71.6850); // Railway Campus default coordinates
+      return const LatLng(29.3970, 71.6850);
     }
-    return CampusLocations.baghdadCampus; // Fallback
+    return CampusLocations.baghdadCampus;
+  }
+
+  String _getOfficialCampusName(String campusName) {
+    final nameLower = campusName.toLowerCase();
+    if (nameLower.contains('baghdad')) {
+      return CampusLocations.baghdadName;
+    } else if (nameLower.contains('abbasia') || nameLower.contains('abasia') || nameLower.contains('old')) {
+      return CampusLocations.abbasiaName;
+    } else if (nameLower.contains('railway')) {
+      return CampusLocations.railwayName;
+    }
+    return campusName; // fallback
   }
 
   Map<String, dynamic> _parseRouteDetails(String? routeString) {
@@ -58,136 +132,402 @@ class AssignedRoutesScreen extends ConsumerWidget {
       }
     }
     
+    // Normalize to exact Dropdown matches so it doesn't crash the Dashboard
+    final officialFrom = _getOfficialCampusName(from);
+    final officialTo = _getOfficialCampusName(to);
+    
     return {
-      "from": from,
-      "to": to,
-      "fromCoord": _getCampusCoord(from),
-      "toCoord": _getCampusCoord(to),
+      "from": officialFrom,
+      "to": officialTo,
+      "fromCoord": _getCampusCoord(officialFrom),
+      "toCoord": _getCampusCoord(officialTo),
     };
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    try {
-      final driverProfileAsync = ref.watch(driverDataStreamProvider);
-      final tripState = ref.watch(driverTripProvider);
+  Widget build(BuildContext context) {
+    // Listen for calendar month/date changes to trigger scroll automatically
+    ref.listen<CalendarState>(calendarProvider, (previous, next) {
+      if (previous?.currentMonth != next.currentMonth) {
+        Future.delayed(const Duration(milliseconds: 50), () {
+          if (mounted) _scrollToSelectedDate();
+        });
+      }
+    });
 
-      return Scaffold(
-        backgroundColor: const Color(0xFFF8FAFC),
-        body: driverProfileAsync.when(
-          data: (driverData) {
-            try {
-              if (driverData == null) {
-                return _buildErrorState(context, "Driver profile not found in database.");
-              }
+    final driverProfileAsync = ref.watch(driverDataStreamProvider);
+    final schedulesAsync = ref.watch(schedulesStreamProvider);
+    final tripState = ref.watch(driverTripProvider);
+    final calendarState = ref.watch(calendarProvider);
 
-              final assignedBus = (driverData['assignedBus']?.toString() ?? '').trim();
-              
-              // Safe parsing for assignedRoutes list
-              final rawRoutes = driverData['assignedRoutes'];
-              final List<dynamic> assignedRoutesList = rawRoutes is List ? rawRoutes : [];
+    final selectedDate = calendarState.selectedDate;
+    final currentMonth = calendarState.currentMonth;
+    final days = _generateDaysInMonth(currentMonth);
 
-              if (assignedBus.isEmpty && assignedRoutesList.isEmpty) {
-                return _buildErrorState(
-                  context, 
-                  "No Bus or Routes assigned to your profile.\nPlease contact your administrator to set up your schedule.",
-                );
-              }
+    // Setup listener to scroll on date change
+    ref.listen<CalendarState>(calendarProvider, (previous, next) {
+      if (previous?.selectedDate.day != next.selectedDate.day ||
+          previous?.selectedDate.month != next.selectedDate.month) {
+        _scrollToSelectedDate();
+      }
+    });
 
-              return StreamBuilder<List<BusSchedule>>(
-                stream: ScheduleService().getSchedules(),
-                builder: (context, snapshot) {
-                  try {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator(color: AppColors.primaryNavy));
-                    }
-
-                    if (snapshot.hasError) {
-                      return _buildErrorState(context, "Error fetching schedules: ${snapshot.error}");
-                    }
-
-                    final allSchedules = snapshot.data ?? [];
-                    final matchingSchedules = allSchedules.where((s) {
-                      if (assignedRoutesList.isNotEmpty && assignedRoutesList.contains(s.id)) {
-                        return true;
-                      }
-                      if (assignedBus.isNotEmpty) {
-                        final sBus = (s.busNumber ?? '').toLowerCase().trim();
-                        final dBus = assignedBus.toLowerCase().trim();
-                        if (sBus == dBus) return true;
-                        final parts = sBus.split(',').map((e) => e.trim());
-                        if (parts.contains(dBus)) return true;
-                        if (sBus.contains(dBus) || dBus.contains(sBus)) return true;
-                      }
-                      return false;
-                    }).toList();
-
-                    if (matchingSchedules.isEmpty) {
-                      return _buildErrorState(
-                        context, 
-                        "No schedules found matching your assigned Bus ($assignedBus) or Routes.",
-                      );
-                    }
-
-                    final assignedRoutes = matchingSchedules.map((schedule) {
-                      final parsed = _parseRouteDetails(schedule.route);
-                      final type = schedule.type ?? 'Combined';
-                      String mappedGender = "Combined";
-                      if (type.toLowerCase().contains("girls")) {
-                        mappedGender = "Girls";
-                      } else if (type.toLowerCase().contains("boys")) {
-                        mappedGender = "Boys";
-                      }
-                      return {
-                        "id": schedule.id,
-                        "from": parsed['from'],
-                        "to": parsed['to'],
-                        "fromCoord": parsed['fromCoord'],
-                        "toCoord": parsed['toCoord'],
-                        "time": schedule.departureTime ?? "Pending",
-                        "busId": assignedBus.isNotEmpty ? assignedBus : (schedule.busNumber ?? ''),
-                        "gender": mappedGender,
-                        "isActive": tripState.isTripStarted && 
-                                    tripState.from == parsed['from'] && 
-                                    tripState.to == parsed['to'],
-                        "stops": "${schedule.stops.length} Stops",
-                      };
-                    }).toList();
-
-                    return CustomScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      slivers: [
-                        _buildSliverAppBar(context, assignedRoutes.length, assignedBus),
-                        SliverPadding(
-                          padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
-                          sliver: SliverList(
-                            delegate: SliverChildBuilderDelegate(
-                              (context, index) => _buildProfessionalRouteCard(context, ref, assignedRoutes[index]),
-                              childCount: assignedRoutes.length,
-                            ),
-                          ),
-                        ),
-                      ],
-                    );
-                  } catch (e, stack) {
-                    debugPrint("AssignedRoutesScreen: Error in StreamBuilder: $e\n$stack");
-                    return _buildErrorState(context, "Data rendering issue: $e");
-                  }
-                },
-              );
-            } catch (e, stack) {
-              debugPrint("AssignedRoutesScreen: Error processing driver profile data: $e\n$stack");
-              return _buildErrorState(context, "Data process issue: $e");
-            }
-          },
-          loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primaryNavy)),
-          error: (e, s) => _buildErrorState(context, "Failed to load driver profile: $e"),
+    if (driverProfileAsync.isLoading || schedulesAsync.isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF8FAFC),
+        body: Center(
+          child: CircularProgressIndicator(color: AppColors.primaryNavy),
         ),
       );
-    } catch (e, stack) {
-      debugPrint("AssignedRoutesScreen: Main build error: $e\n$stack");
-      return _buildErrorState(context, "Internal Layout Error: $e");
     }
+
+    if (driverProfileAsync.hasError) {
+      return _buildErrorState(context, "Failed to load driver profile: ${driverProfileAsync.error}");
+    }
+
+    if (schedulesAsync.hasError) {
+      return _buildErrorState(context, "Failed to load schedules: ${schedulesAsync.error}");
+    }
+
+    final driverData = driverProfileAsync.value;
+    if (driverData == null) {
+      return _buildErrorState(context, "Driver profile not found in database.");
+    }
+
+    final assignedBus = (driverData['assignedBus']?.toString() ?? '').trim();
+    final rawRoutes = driverData['assignedRoutes'];
+    final List<dynamic> assignedRoutesList = rawRoutes is List ? rawRoutes : [];
+
+    if (assignedBus.isEmpty && assignedRoutesList.isEmpty) {
+      return _buildErrorState(
+        context, 
+        "No Bus or Routes assigned to your profile.\nPlease contact your administrator to set up your schedule.",
+      );
+    }
+
+    final allSchedules = schedulesAsync.value ?? [];
+    final matchingSchedules = allSchedules.where((s) {
+      // 1. Try to match by explicit Route IDs
+      if (assignedRoutesList.isNotEmpty) {
+        if (assignedRoutesList.contains(s.id)) return true;
+        // Also check if route names are used in the assignment list
+        if (assignedRoutesList.any((r) => r.toString().toLowerCase().trim() == s.route.toLowerCase().trim())) {
+          return true;
+        }
+      }
+
+      // 2. Try to match by Bus Number
+      if (assignedBus.isNotEmpty) {
+        final sBus = s.busNumber.toLowerCase().trim();
+        final dBus = assignedBus.toLowerCase().trim();
+        
+        // Exact match
+        if (sBus == dBus) return true;
+        
+        // Comma separated list in schedule (e.g. "12, 14, 15")
+        final parts = sBus.split(',').map((e) => e.trim()).toList();
+        if (parts.contains(dBus)) return true;
+        
+        // Substring match (e.g. "Bus 12" matches "12")
+        if (sBus.contains(dBus) || dBus.contains(sBus)) return true;
+
+        // Numeric extraction match (e.g. "Bus 12" matches "Route 12")
+        final sBusNum = RegExp(r'\d+').firstMatch(sBus)?.group(0);
+        final dBusNum = RegExp(r'\d+').firstMatch(dBus)?.group(0);
+        if (sBusNum != null && dBusNum != null && sBusNum == dBusNum) return true;
+      }
+      return false;
+    }).toList();
+
+    if (matchingSchedules.isEmpty) {
+      return _buildErrorState(
+        context, 
+        "No schedules found matching your assigned Bus ($assignedBus) or Routes.",
+      );
+    }
+
+    final selectedDateStr = _formatDate(selectedDate);
+    final selectedDayName = _getWeekdayName(selectedDate);
+
+    final filteredSchedules = matchingSchedules.where((schedule) {
+      // If a specific date is assigned to this schedule
+      if (schedule.date != null && schedule.date!.isNotEmpty) {
+        return schedule.date == selectedDateStr;
+      }
+      
+      // If operating days are defined
+      if (schedule.operatingDays != null && schedule.operatingDays!.isNotEmpty) {
+        return schedule.operatingDays!.any((day) => 
+          day.toLowerCase().trim() == selectedDayName.toLowerCase()
+        );
+      }
+      
+      // Fallback: Default to Mon-Fri if no specific days defined
+      return selectedDayName != 'Saturday' && selectedDayName != 'Sunday';
+    }).toList();
+
+    final assignedRoutes = filteredSchedules.map((schedule) {
+      final parsed = _parseRouteDetails(schedule.route);
+      final type = schedule.type;
+      String mappedGender = "Combined";
+      if (type.toLowerCase().contains("girls")) {
+        mappedGender = "Girls";
+      } else if (type.toLowerCase().contains("boys")) {
+        mappedGender = "Boys";
+      }
+
+      bool isPassed = false;
+      final now = DateTime.now();
+      if (selectedDate.year < now.year || 
+         (selectedDate.year == now.year && selectedDate.month < now.month) ||
+         (selectedDate.year == now.year && selectedDate.month == now.month && selectedDate.day < now.day)) {
+        isPassed = true;
+      } else if (selectedDate.year == now.year && selectedDate.month == now.month && selectedDate.day == now.day) {
+        final timeStr = schedule.departureTime;
+        if (timeStr.isNotEmpty && timeStr.toLowerCase() != 'pending') {
+          try {
+            int hour = 0;
+            int minute = 0;
+            final isPM = timeStr.toLowerCase().contains('pm');
+            final isAM = timeStr.toLowerCase().contains('am');
+            final cleanTime = timeStr.replaceAll(RegExp(r'[^0-9:]'), '');
+            final parts = cleanTime.split(':');
+            if (parts.length >= 2) {
+              hour = int.tryParse(parts[0]) ?? 0;
+              minute = int.tryParse(parts[1]) ?? 0;
+              if (isPM && hour < 12) hour += 12;
+              if (isAM && hour == 12) hour = 0;
+              
+              final scheduleTime = DateTime(now.year, now.month, now.day, hour, minute);
+              if (now.isAfter(scheduleTime.add(const Duration(minutes: 30)))) {
+                isPassed = true;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      return {
+        "id": schedule.id,
+        "from": parsed['from'],
+        "to": parsed['to'],
+        "fromCoord": parsed['fromCoord'],
+        "toCoord": parsed['toCoord'],
+        "time": schedule.departureTime.isEmpty ? "Pending" : schedule.departureTime,
+        "busId": assignedBus.isNotEmpty ? assignedBus : schedule.busNumber,
+        "gender": mappedGender,
+        "isPassed": isPassed,
+        "isActive": tripState.isTripStarted && 
+                    tripState.from == parsed['from'] && 
+                    tripState.to == parsed['to'],
+        "stops": "${schedule.stops.length} Stops",
+      };
+    }).toList();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF8FAFC),
+      body: CustomScrollView(
+        physics: const BouncingScrollPhysics(),
+        slivers: [
+          _buildSliverAppBar(context, assignedRoutes.length, assignedBus),
+          
+          // Date picker section
+          SliverToBoxAdapter(
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.02),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                children: [
+                  // Month Navigation Row
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.calendar_month_rounded, color: AppColors.primaryNavy, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${_getMonthName(currentMonth)} ${currentMonth.year}',
+                            style: GoogleFonts.poppins(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textDark,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed: () => ref.read(calendarProvider.notifier).changeMonth(-1),
+                            icon: const Icon(Icons.chevron_left_rounded, size: 20),
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(4),
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.grey[100],
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            onPressed: () => ref.read(calendarProvider.notifier).changeMonth(1),
+                            icon: const Icon(Icons.chevron_right_rounded, size: 20),
+                            constraints: const BoxConstraints(),
+                            padding: const EdgeInsets.all(4),
+                            style: IconButton.styleFrom(
+                              backgroundColor: Colors.grey[100],
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  
+                  // Horizontal calendar list
+                  SizedBox(
+                    height: 72,
+                    child: ListView.builder(
+                      controller: _calendarScrollController,
+                      scrollDirection: Axis.horizontal,
+                      itemCount: days.length,
+                      itemBuilder: (context, index) {
+                        final date = days[index];
+                        final isSelected = date.year == selectedDate.year &&
+                            date.month == selectedDate.month &&
+                            date.day == selectedDate.day;
+                        final isToday = date.year == DateTime.now().year &&
+                            date.month == DateTime.now().month &&
+                            date.day == DateTime.now().day;
+                        final dayOfWeek = _getWeekdayName(date).substring(0, 3);
+
+                        return GestureDetector(
+                          onTap: () {
+                            ref.read(calendarProvider.notifier).selectDate(date);
+                          },
+                          child: Container(
+                            width: 54,
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              gradient: isSelected
+                                  ? const LinearGradient(
+                                      colors: [AppColors.primaryNavy, Color(0xFF424F9A)],
+                                      begin: Alignment.topLeft,
+                                      end: Alignment.bottomRight,
+                                    )
+                                  : null,
+                              color: isSelected ? null : (isToday ? AppColors.primaryNavy.withValues(alpha: 0.05) : Colors.transparent),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected
+                                    ? Colors.transparent
+                                    : (isToday ? AppColors.primaryNavy.withValues(alpha: 0.3) : Colors.grey[200]!),
+                                width: isToday ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  dayOfWeek.toUpperCase(),
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 9,
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                    color: isSelected ? Colors.white.withValues(alpha: 0.8) : AppColors.textSecondary,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  date.day.toString(),
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: isSelected ? Colors.white : AppColors.textDark,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Date Text Indicator
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+              child: Row(
+                children: [
+                  Text(
+                    '${_getWeekdayName(selectedDate)}, ${selectedDate.day} ${_getMonthName(selectedDate).substring(0, 3)}',
+                    style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: AppColors.primaryNavy,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
+          // Empty State vs Route list
+          if (assignedRoutes.isEmpty)
+            _buildSliverEmptyState()
+          else
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 20, 16, 40),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) => _buildProfessionalRouteCard(context, assignedRoutes[index]),
+                  childCount: assignedRoutes.length,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSliverEmptyState() {
+    return SliverFillRemaining(
+      hasScrollBody: false,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 60.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.calendar_month_outlined, size: 60, color: Colors.grey[300]),
+              const SizedBox(height: 16),
+              Text(
+                "No assigned routes for this date",
+                style: GoogleFonts.poppins(
+                  color: Colors.grey[500],
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildSliverAppBar(BuildContext context, int count, String busNum) {
@@ -219,7 +559,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
                 bottom: -40,
                 child: CircleAvatar(
                   radius: 120,
-                  backgroundColor: Colors.white.withOpacity(0.03),
+                  backgroundColor: Colors.white.withValues(alpha: 0.03),
                 ),
               ),
               Positioned(
@@ -227,7 +567,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
                 top: -20,
                 child: CircleAvatar(
                   radius: 80,
-                  backgroundColor: Colors.white.withOpacity(0.02),
+                  backgroundColor: Colors.white.withValues(alpha: 0.02),
                 ),
               ),
               Padding(
@@ -238,9 +578,9 @@ class AssignedRoutesScreen extends ConsumerWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                        color: Colors.green.withOpacity(0.15),
+                        color: Colors.green.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.green.withOpacity(0.3)),
+                        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
                       ),
                       child: Text(
                         "ASSIGNED WORKLOAD",
@@ -319,7 +659,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
             border: Border.all(color: const Color(0xFFE2E8F0)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.02),
+                color: Colors.black.withValues(alpha: 0.02),
                 blurRadius: 20,
                 offset: const Offset(0, 8),
               ),
@@ -339,7 +679,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
                 child: Icon(
                   Icons.route_rounded, 
                   size: 44, 
-                  color: AppColors.primaryNavy.withOpacity(0.6),
+                  color: AppColors.primaryNavy.withValues(alpha: 0.6),
                 ),
               ),
               const SizedBox(height: 24),
@@ -393,8 +733,9 @@ class AssignedRoutesScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildProfessionalRouteCard(BuildContext context, WidgetRef ref, Map<String, dynamic> route) {
+  Widget _buildProfessionalRouteCard(BuildContext context, Map<String, dynamic> route) {
     bool isActive = route['isActive'];
+    bool isPassed = route['isPassed'] ?? false;
     final fromCoord = route['fromCoord'] as LatLng;
     final toCoord = route['toCoord'] as LatLng;
     final center = LatLng((fromCoord.latitude + toCoord.latitude) / 2, (fromCoord.longitude + toCoord.longitude) / 2);
@@ -435,8 +776,8 @@ class AssignedRoutesScreen extends ConsumerWidget {
         boxShadow: [
           BoxShadow(
             color: isActive 
-                ? Colors.green.withOpacity(0.06) 
-                : Colors.black.withOpacity(0.03),
+                ? Colors.green.withValues(alpha: 0.06) 
+                : Colors.black.withValues(alpha: 0.03),
             blurRadius: 24,
             offset: const Offset(0, 8),
           ),
@@ -472,7 +813,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
                             decoration: BoxDecoration(
                               color: lightAccentColor,
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: accentColor.withOpacity(0.2)),
+                              border: Border.all(color: accentColor.withValues(alpha: 0.2)),
                             ),
                             child: Row(
                               children: [
@@ -517,12 +858,26 @@ class AssignedRoutesScreen extends ConsumerWidget {
                       if (isActive) 
                         const _PulsingLiveBadge()
                       else
-                        Text(
-                          route['time'] ?? 'Pending',
-                          style: GoogleFonts.poppins(
-                            color: Colors.green.shade700,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: isPassed ? Colors.grey.shade100 : Colors.green.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: isPassed ? Colors.grey.shade300 : Colors.green.withValues(alpha: 0.2)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.access_time_filled_rounded, size: 14, color: isPassed ? Colors.grey.shade500 : Colors.green.shade700),
+                              const SizedBox(width: 4),
+                              Text(
+                                route['time'] ?? 'Pending',
+                                style: GoogleFonts.poppins(
+                                  color: isPassed ? Colors.grey.shade600 : Colors.green.shade700,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                     ],
@@ -588,7 +943,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
                                       polylines: [
                                         Polyline(
                                           points: [fromCoord, toCoord],
-                                          color: accentColor.withOpacity(0.6),
+                                          color: accentColor.withValues(alpha: 0.6),
                                           strokeWidth: 3,
                                         ),
                                       ],
@@ -600,7 +955,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
                             Container(
                               decoration: BoxDecoration(
                                 gradient: RadialGradient(
-                                  colors: [Colors.transparent, Colors.white.withOpacity(0.2)],
+                                  colors: [Colors.transparent, Colors.white.withValues(alpha: 0.2)],
                                   stops: const [0.7, 1.0],
                                 ),
                               ),
@@ -632,35 +987,45 @@ class AssignedRoutesScreen extends ConsumerWidget {
                         ],
                       ),
                       ElevatedButton(
-                        onPressed: () {
-                          // Pre-fill trip selection and go back to dashboard
+                        onPressed: isPassed ? null : () {
+                          final nav = Navigator.of(context);
+
+                          // 1. Pre-fill trip selection in driverTripProvider FIRST (before pop)
                           ref.read(driverTripProvider.notifier).updateInputs(
                             from: route['from'],
                             to: route['to'],
                             bus: route['busId'],
                             gender: route['gender'],
+                            departureTime: route['time'],
                           );
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text("Selected Route: ${route['from']} ➔ ${route['to']}"),
-                              backgroundColor: AppColors.primaryNavy,
-                            ),
+
+                          // 2. Show notification
+                          NotificationService.show(
+                            title: "Route Selected",
+                            message: "${route['from']} ➔ ${route['to']} · ${route['time']}",
+                            type: NotificationType.success,
                           );
+
+                          // 3. Navigate back AFTER state is updated
+                          if (mounted) {
+                            nav.pop();
+                          }
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isActive ? Colors.green.shade500 : AppColors.primaryNavy,
-                          foregroundColor: Colors.white,
+                          backgroundColor: isPassed ? Colors.grey.shade300 : (isActive ? Colors.green.shade500 : AppColors.primaryNavy),
+                          foregroundColor: isPassed ? Colors.grey.shade600 : Colors.white,
                           elevation: 0,
+                          minimumSize: const Size(0, 40),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
                           ),
                         ),
                         child: Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              isActive ? "ACTIVE NOW" : "COMMENCE",
+                              isPassed ? "COMPLETED" : (isActive ? "ACTIVE NOW" : "COMMENCE"),
                               style: GoogleFonts.poppins(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
@@ -668,7 +1033,7 @@ class AssignedRoutesScreen extends ConsumerWidget {
                               ),
                             ),
                             const SizedBox(width: 6),
-                            const Icon(Icons.arrow_forward_ios_rounded, size: 12),
+                            Icon(isPassed ? Icons.check_circle_rounded : Icons.arrow_forward_ios_rounded, size: 12),
                           ],
                         ),
                       ),
@@ -784,10 +1149,10 @@ class _PulsingLiveBadgeState extends State<_PulsingLiveBadge> with SingleTickerP
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
-            color: Colors.green.withOpacity(0.1 + (_controller.value * 0.1)),
+            color: Colors.green.withValues(alpha: 0.1 + (_controller.value * 0.1)),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: Colors.green.withOpacity(0.3 + (_controller.value * 0.7)),
+              color: Colors.green.withValues(alpha: 0.3 + (_controller.value * 0.7)),
               width: 1.5,
             ),
           ),

@@ -20,6 +20,7 @@ class DriverTripState {
   final String? from;
   final String? to;
   final String gender;
+  final String departureTime;   // e.g. "07:30 AM" — shown on dashboard
   final List<LatLng> routePoints;
   final String remainingDistance;
   final String remainingTime;
@@ -27,6 +28,7 @@ class DriverTripState {
   final double heading;
   final double speed;
   final bool isLoading;
+  final bool hasRestored;
 
   DriverTripState({
     this.isTripStarted = false,
@@ -36,6 +38,7 @@ class DriverTripState {
     this.from,
     this.to,
     this.gender = "Combined",
+    this.departureTime = "",
     this.routePoints = const [],
     this.remainingDistance = "---",
     this.remainingTime = "---",
@@ -43,6 +46,7 @@ class DriverTripState {
     this.heading = 0.0,
     this.speed = 0.0,
     this.isLoading = false,
+    this.hasRestored = false,
   });
 
   DriverTripState copyWith({
@@ -53,6 +57,7 @@ class DriverTripState {
     String? from,
     String? to,
     String? gender,
+    String? departureTime,
     List<LatLng>? routePoints,
     String? remainingDistance,
     String? remainingTime,
@@ -60,6 +65,7 @@ class DriverTripState {
     double? heading,
     double? speed,
     bool? isLoading,
+    bool? hasRestored,
   }) {
     return DriverTripState(
       isTripStarted: isTripStarted ?? this.isTripStarted,
@@ -69,6 +75,7 @@ class DriverTripState {
       from: from ?? this.from,
       to: to ?? this.to,
       gender: gender ?? this.gender,
+      departureTime: departureTime ?? this.departureTime,
       routePoints: routePoints ?? this.routePoints,
       remainingDistance: remainingDistance ?? this.remainingDistance,
       remainingTime: remainingTime ?? this.remainingTime,
@@ -76,6 +83,7 @@ class DriverTripState {
       heading: heading ?? this.heading,
       speed: speed ?? this.speed,
       isLoading: isLoading ?? this.isLoading,
+      hasRestored: hasRestored ?? this.hasRestored,
     );
   }
 }
@@ -137,14 +145,30 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
     String? from,
     String? to,
     String? gender,
+    String? departureTime,
   }) {
+    // Sanitize: ignore literal 'null' strings or empty from/to
+    final safeFrom = (from != null && from.trim().isNotEmpty && from.trim().toLowerCase() != 'null')
+        ? from.trim()
+        : state.from;
+    final safeTo = (to != null && to.trim().isNotEmpty && to.trim().toLowerCase() != 'null')
+        ? to.trim()
+        : state.to;
+
     state = state.copyWith(
-      busNumber: bus,
+      busNumber: (bus != null && bus.trim().isNotEmpty) ? bus.trim() : null,
       plateNumber: plate,
-      from: from,
-      to: to,
+      from: safeFrom,
+      to: safeTo,
       gender: gender,
+      departureTime: (departureTime != null && departureTime.trim().isNotEmpty)
+          ? departureTime.trim()
+          : null,
     );
+
+    if (safeFrom != null && safeTo != null) {
+      _refreshNavigation();
+    }
   }
 
   Future<void> restoreActiveTrip(String uid) async {
@@ -168,7 +192,10 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
     } catch (e) {
       AppLogger.error("Restore failed: $e");
     } finally {
-      state = state.copyWith(isLoading: false);
+      state = state.copyWith(
+        isLoading: false,
+        hasRestored: true,
+      );
     }
   }
 
@@ -178,33 +205,36 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
     final routeName = "${state.from} ➔ ${state.to}";
     final manualPoints = CustomRoutes.getRoutePoints(routeName);
 
+    final startHubCoord = _getHubCoord(state.from!);
+    final target = _getHubCoord(state.to!);
+    if (target == null) return;
+
+    // Use Start Hub coordinates if trip has not started yet, otherwise use current live location.
+    final origin = state.isTripStarted 
+        ? state.currentLocation 
+        : (startHubCoord ?? state.currentLocation);
+
     if (manualPoints.isNotEmpty && manualPoints.length > 2) {
       // ⚡ PROFESSIONAL: Use manual points for the map path
-      final target = _hubs[state.to!];
-      if (target != null) {
-        // We still call OSRM only for Distance/Time estimates, but keep the manual points for drawing
-        final routeData = await RoutingService.getFullRoute([
-          state.currentLocation,
-          target,
-        ]);
-        state = state.copyWith(
-          routePoints: manualPoints,
-          remainingDistance:
-              routeData != null
-                  ? "${(routeData.distanceMeters / 1000).toStringAsFixed(1)} KM"
-                  : state.remainingDistance,
-          remainingTime:
-              routeData != null
-                  ? "${(routeData.durationSeconds / 60).ceil()} MIN"
-                  : state.remainingTime,
-        );
-      }
+      final routeData = await RoutingService.getFullRoute([
+        origin,
+        target,
+      ]);
+      state = state.copyWith(
+        routePoints: manualPoints,
+        remainingDistance:
+            routeData != null
+                ? "${(routeData.distanceMeters / 1000).toStringAsFixed(1)} KM"
+                : state.remainingDistance,
+        remainingTime:
+            routeData != null
+                ? "${(routeData.durationSeconds / 60).ceil()} MIN"
+                : state.remainingTime,
+      );
     } else {
       // Fallback to OSRM if no manual points are defined
-      final target = _hubs[state.to!];
-      if (target == null) return;
       final routeData = await RoutingService.getFullRoute([
-        state.currentLocation,
+        origin,
         target,
       ]);
       if (routeData != null) {
@@ -278,11 +308,26 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
         );
       }
     } else {
+      final oldBusNumber = state.busNumber;
+      final oldFrom = state.from ?? "Unknown Origin";
+      final oldTo = state.to ?? "Unknown Destination";
+      final oldTripId = state.activeTripId;
+
       // Terminate Trip: Perform a FULL RESET of the state
-      await _locationService.stopSharingLocation(
-        uid,
-        state.busNumber,
-        state.activeTripId!,
+      if (oldTripId != null) {
+        await _locationService.stopSharingLocation(
+          uid,
+          oldBusNumber,
+          oldTripId,
+        );
+      }
+
+      // ⚡ Publish trip completion alert to RTDB for Students and Admin
+      await TripAlertService().publishTripEnd(
+        busId: oldBusNumber,
+        from: oldFrom,
+        to: oldTo,
+        driverName: driverName,
       );
 
       state = state.copyWith(
@@ -298,19 +343,21 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
       );
 
       NotificationService.show(
-        title: "Trip Terminated",
-        message:
-            "Your live tracking session has ended and state has been reset.",
-        type: NotificationType.warning,
+        title: "Route Completed! 🎉",
+        message: "Congratulations! You have successfully completed your assigned route.",
+        type: NotificationType.success,
       );
     }
   }
 
-  /// Hub coordinates — using CampusLocations for consistency across the app.
-  static final Map<String, LatLng> _hubs = {
-    CampusLocations.baghdadName: CampusLocations.baghdadCampus,
-    CampusLocations.abbasiaName: CampusLocations.abbasiaCampus,
-  };
+  /// Helper to robustly get hub coordinates from loose string matches
+  LatLng? _getHubCoord(String name) {
+    final lower = name.toLowerCase();
+    if (lower.contains('baghdad')) return CampusLocations.baghdadCampus;
+    if (lower.contains('abbasia') || lower.contains('abasia') || lower.contains('old')) return CampusLocations.abbasiaCampus;
+    if (lower.contains('railway')) return const LatLng(29.3970, 71.6850);
+    return null;
+  }
 }
 
 final driverTripProvider =

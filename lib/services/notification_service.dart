@@ -1,6 +1,7 @@
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -38,84 +39,97 @@ class NotificationService {
     required String message,
     NotificationType type = NotificationType.info,
   }) {
-    final Color bgColor = _getBgColor(type);
-    final IconData icon = _getIcon(type);
+    SharedPreferences.getInstance().then((prefs) {
+      final inAppEnabled = prefs.getBool('pref_in_app_alerts') ?? true;
+      if (!inAppEnabled) return;
 
-    messengerKey.currentState?.clearSnackBars();
-    messengerKey.currentState?.showSnackBar(
-      SnackBar(
-        content: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [bgColor, bgColor.withValues(alpha: 0.85)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+      final emergencyOnly = prefs.getBool('pref_emergency_only') ?? false;
+      if (emergencyOnly &&
+          type != NotificationType.error &&
+          type != NotificationType.warning &&
+          type != NotificationType.proximity) {
+        return;
+      }
+
+      final Color bgColor = _getBgColor(type);
+      final IconData icon = _getIcon(type);
+
+      messengerKey.currentState?.clearSnackBars();
+      messengerKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [bgColor, bgColor.withValues(alpha: 0.85)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: [
+                BoxShadow(
+                  color: bgColor.withValues(alpha: 0.4),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                ),
+              ],
             ),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: bgColor.withValues(alpha: 0.4),
-                blurRadius: 15,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 24),
                 ),
-                child: Icon(icon, color: Colors.white, size: 24),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.poppins(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                        color: Colors.white,
-                        letterSpacing: 0.5,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                          color: Colors.white,
+                          letterSpacing: 0.5,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      message,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                        color: Colors.white.withValues(alpha: 0.95),
-                        fontWeight: FontWeight.w500,
+                      const SizedBox(height: 2),
+                      Text(
+                        message,
+                        style: GoogleFonts.poppins(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.95),
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-        ),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        duration: const Duration(seconds: 4),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        margin: const EdgeInsets.only(
-          left: 16,
-          right: 16,
-          bottom:
-              110, // Positioned above bottom navigation for perfect visibility
-        ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          duration: const Duration(seconds: 4),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          margin: const EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom:
+                110, // Positioned above bottom navigation for perfect visibility
+          ),
 
-        dismissDirection: DismissDirection.horizontal,
-      ),
-    );
+          dismissDirection: DismissDirection.horizontal,
+        ),
+      );
+    });
   }
 
   static Future<void> showLocalNotification({
@@ -123,26 +137,31 @@ class NotificationService {
     required String body,
     int id = 0,
   }) async {
-    const AndroidNotificationDetails androidPlatformChannelSpecifics =
-        AndroidNotificationDetails(
-          'trip_alerts_channel',
-          'Trip Alerts',
-          channelDescription: 'Notifications for new trips and bus movements',
-          importance: Importance.max,
-          priority: Priority.high,
-          playSound: true,
-          showWhen: true,
-          color: Color(0xFF0A1D56), // primaryNavy
-        );
+    final prefs = await SharedPreferences.getInstance();
+    final localEnabled = prefs.getBool('pref_local_notifications') ?? true;
+    if (!localEnabled) return;
 
-    const DarwinNotificationDetails iosPlatformChannelSpecifics =
-        DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        );
+    final soundVibrateEnabled = prefs.getBool('pref_vibrate_sounds') ?? true;
 
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+    final androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'trip_alerts_channel',
+      'Trip Alerts',
+      channelDescription: 'Notifications for new trips and bus movements',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: soundVibrateEnabled,
+      enableVibration: soundVibrateEnabled,
+      showWhen: true,
+      color: const Color(0xFF0A1D56), // primaryNavy
+    );
+
+    final iosPlatformChannelSpecifics = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: soundVibrateEnabled,
+    );
+
+    final NotificationDetails platformChannelSpecifics = NotificationDetails(
       android: androidPlatformChannelSpecifics,
       iOS: iosPlatformChannelSpecifics,
     );

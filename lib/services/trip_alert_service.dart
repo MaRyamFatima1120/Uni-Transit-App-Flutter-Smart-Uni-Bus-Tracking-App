@@ -28,6 +28,29 @@ class TripAlertService {
     }
   }
 
+  /// Publishes a trip completion alert to Firebase RTDB for students and Admin.
+  Future<void> publishTripEnd({
+    required String busId,
+    required String from,
+    required String to,
+    required String driverName,
+  }) async {
+    try {
+      final String alertId = _dbRef.push().key!;
+      await _dbRef.child(alertId).set({
+        'busId': busId,
+        'from': from,
+        'to': to,
+        'driverName': driverName,
+        'timestamp': ServerValue.timestamp,
+        'type': 'trip_completed',
+      });
+      AppLogger.info("Trip End Alert Published: $busId");
+    } catch (e) {
+      AppLogger.error("Failed to publish trip end alert: $e");
+    }
+  }
+
   /// Listens for new trip alerts and triggers a callback.
   /// Throttles to only show alerts created after the listener started.
   Stream<Map<String, dynamic>> get alertStream {
