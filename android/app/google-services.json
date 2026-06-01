@@ -1,0 +1,30 @@
+﻿{
+  "project_info": {
+    "project_number": "413834253790",
+    "firebase_url": "https://uni-transit-app-4556-default-rtdb.firebaseio.com",
+    "project_id": "uni-transit-app-4556",
+    "storage_bucket": "uni-transit-app-4556.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:413834253790:android:bd10f3529a6bd79129f94f",
+        "android_client_info": {
+          "package_name": "com.microcode.uni_transit"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtDuop5mBwGULZ8y-56z199FokoeZ9F6Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
