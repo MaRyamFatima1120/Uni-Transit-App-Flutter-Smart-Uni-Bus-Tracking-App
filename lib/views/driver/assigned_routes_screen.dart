@@ -532,7 +532,7 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
 
   Widget _buildSliverAppBar(BuildContext context, int count, String busNum) {
     return SliverAppBar(
-      expandedHeight: 180,
+      expandedHeight: 200,
       pinned: true,
       backgroundColor: AppColors.primaryNavy,
       elevation: 0,
@@ -571,7 +571,7 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 76, 24, 0),
+                padding: const EdgeInsets.fromLTRB(24, 90, 24, 0),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -736,9 +736,6 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
   Widget _buildProfessionalRouteCard(BuildContext context, Map<String, dynamic> route) {
     bool isActive = route['isActive'];
     bool isPassed = route['isPassed'] ?? false;
-    final fromCoord = route['fromCoord'] as LatLng;
-    final toCoord = route['toCoord'] as LatLng;
-    final center = LatLng((fromCoord.latitude + toCoord.latitude) / 2, (fromCoord.longitude + toCoord.longitude) / 2);
     final String gender = route['gender'] ?? 'Combined';
 
     // Premium styling parameters based on gender config
@@ -913,79 +910,15 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                           ],
                         ),
                       ),
-                      
-                      const SizedBox(width: 16),
-
-                      // Interactive Stylized Map Window (Right)
-                      Container(
-                        width: 100,
-                        height: 110,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        clipBehavior: Clip.antiAlias,
-                        child: Stack(
-                          children: [
-                            ExcludeSemantics(
-                              child: AbsorbPointer(
-                                child: FlutterMap(
-                                  options: MapOptions(
-                                    initialCenter: center,
-                                    initialZoom: 10.5,
-                                  ),
-                                  children: [
-                                    TileLayer(
-                                      urlTemplate: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-                                      subdomains: const ['a', 'b', 'c', 'd'],
-                                    ),
-                                    PolylineLayer(
-                                      polylines: [
-                                        Polyline(
-                                          points: [fromCoord, toCoord],
-                                          color: accentColor.withValues(alpha: 0.6),
-                                          strokeWidth: 3,
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                            Container(
-                              decoration: BoxDecoration(
-                                gradient: RadialGradient(
-                                  colors: [Colors.transparent, Colors.white.withValues(alpha: 0.2)],
-                                  stops: const [0.7, 1.0],
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
                     ],
                   ),
 
                   const SizedBox(height: 24),
 
-                  // Bottom action buttons and stop counts
+                  // Bottom action buttons (Stops count removed)
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
-                      Row(
-                        children: [
-                          Icon(Icons.stop_circle_outlined, size: 16, color: Colors.grey.shade400),
-                          const SizedBox(width: 4),
-                          Text(
-                            route['stops'] ?? '0 Stops',
-                            style: GoogleFonts.poppins(
-                              color: Colors.grey.shade600,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
                       ElevatedButton(
                         onPressed: isPassed ? null : () {
                           final nav = Navigator.of(context);
@@ -1025,7 +958,7 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              isPassed ? "COMPLETED" : (isActive ? "ACTIVE NOW" : "COMMENCE"),
+                              isPassed ? "COMPLETED" : (isActive ? "ACTIVE NOW" : "SELECT ROUTE"),
                               style: GoogleFonts.poppins(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,

@@ -86,6 +86,7 @@ class LocationService {
     required double lat, required double lng,
     String plateNumber = "",
     String remainingTime = "Calculating...",
+    String remainingDistance = "Calculating...",
   }) async {
 
     final tripId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -114,6 +115,7 @@ class LocationService {
       'departureTime': departureTime,
       'arrivalTime': arrivalTime,
       'remainingTime': remainingTime,
+      'remainingDistance': remainingDistance,
       'lastUpdated': ServerValue.timestamp,
     });
 
@@ -145,6 +147,7 @@ class LocationService {
     double heading, {
     double speed = 0.0,
     String remainingTime = "",
+    String remainingDistance = "",
     String arrivalTime = "",
   }) async {
     // Validate coordinates before writing
@@ -159,6 +162,7 @@ class LocationService {
       'heading': heading,
       'speed': speed,
       'remainingTime': remainingTime,
+      if (remainingDistance.isNotEmpty) 'remainingDistance': remainingDistance,
       'arrivalTime': arrivalTime,
       'lastUpdated': ServerValue.timestamp,
     });

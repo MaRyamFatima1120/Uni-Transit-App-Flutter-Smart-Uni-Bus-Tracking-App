@@ -134,7 +134,7 @@ class MyApp extends ConsumerWidget {
 
   void _precacheImages(BuildContext context) {
     try {
-      precacheImage(const AssetImage('assets/images/IUBLogo.png'), context);
+      precacheImage(const AssetImage('assets/images/unitransit_logo.png'), context);
       precacheImage(const AssetImage('assets/images/tracking.png'), context);
       precacheImage(const AssetImage('assets/images/schedule.png'), context);
       precacheImage(const AssetImage('assets/images/safety.png'), context);

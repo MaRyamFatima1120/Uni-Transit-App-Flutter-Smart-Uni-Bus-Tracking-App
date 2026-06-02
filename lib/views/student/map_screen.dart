@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:intl/intl.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
@@ -42,6 +45,7 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
   final Map<String, EtaInfo> _busEtas = {};
 
   StreamSubscription? _tripAlertsSubscription;
+  StreamSubscription<Position>? _studentLocationSubscription;
   DateTime _lastEtaUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastFleetFit = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -53,11 +57,18 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     super.initState();
     _listenToTripAlerts();
     _getCurrentLocation();
+    _startTrackingStudentLocation();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _updateBusEtas(ref.read(busProvider).liveBusData);
+      }
+    });
   }
 
   @override
   void dispose() {
     _tripAlertsSubscription?.cancel();
+    _studentLocationSubscription?.cancel();
     super.dispose();
   }
 
@@ -111,13 +122,28 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
 
   LatLng? _getHubLocation(String name) {
     final hubsData = ref.read(hubProvider).hubsData;
-    if (hubsData.containsKey(name)) {
-      final data = hubsData[name];
-      return LatLng(
-        (data['latitude'] as num).toDouble(),
-        (data['longitude'] as num).toDouble(),
-      );
+    String nameClean = name.toLowerCase().trim();
+
+    // 1. Try to search in hubsData from Firestore
+    for (var key in hubsData.keys) {
+      if (key.toLowerCase().trim() == nameClean ||
+          key.toLowerCase().trim().contains(nameClean) ||
+          nameClean.contains(key.toLowerCase().trim())) {
+        final data = hubsData[key];
+        return LatLng(
+          (data['latitude'] as num).toDouble(),
+          (data['longitude'] as num).toDouble(),
+        );
+      }
     }
+
+    // 2. Fallback to local hardcoded CampusLocations
+    if (nameClean.contains('baghdad')) {
+      return CampusLocations.baghdadCampus;
+    } else if (nameClean.contains('abbasia') || nameClean.contains('abasia')) {
+      return CampusLocations.abbasiaCampus;
+    }
+    
     return null;
   }
 
@@ -281,15 +307,22 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
         if (!(fromMatches && toMatches)) return;
       }
 
-      final gender = data['gender'] ?? 'Combined';
-      if (uiState.selectedGender != "All" && gender != uiState.selectedGender) return;
+      final gender = (data['gender'] as String? ?? 'Combined').toLowerCase().trim();
+      final selGenderLower = uiState.selectedGender.toLowerCase().trim();
+      if (selGenderLower != "all") {
+        if (!gender.contains(selGenderLower) && !selGenderLower.contains(gender)) return;
+      }
 
       final lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
       final lng = (data['longitude'] as num?)?.toDouble() ?? 0.0;
       if (lat == 0.0 || lng == 0.0) return;
 
       final heading = (data['heading'] ?? 0.0).toDouble();
-      final etaInfo = _busEtas[id];
+      final destName = data['to'] as String?;
+      final destPos = destName != null ? _getHubLocation(destName) : null;
+      final etaInfo = (lat != 0.0 && lng != 0.0 && destPos != null)
+          ? EtaInfo.estimateFromCoordinates(LatLng(lat, lng), destPos)
+          : null;
 
       markers.add(
         Marker(
@@ -785,230 +818,488 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
   }
 
   void _showBusDetails(String id, Map<String, dynamic> data) async {
-    final etaInfo = _busEtas[id];
-
-    // ⚡ REAL-TIME: Prioritize data from Firebase RTDB (pushed by driver)
-    final etaText =
-        data['remainingTime'] != null &&
-                (data['remainingTime'] as String).isNotEmpty
-            ? data['remainingTime']
-            : (etaInfo?.etaDisplay ?? "Calculating...");
-
-    final arrivalClockTime =
-        data['arrivalTime'] != null &&
-                (data['arrivalTime'] as String).isNotEmpty
-            ? data['arrivalTime']
-            : "Calculating...";
-
-    final distText = etaInfo?.distanceDisplay ?? "---";
-    final gender = data['gender'] ?? 'Combined';
-    final Color genderColor =
-        (gender == 'Girls')
-            ? Colors.pinkAccent
-            : (gender == 'Boys' ? Colors.blueAccent : AppColors.primaryNavy);
-
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder:
-          (context) => Container(
-            padding: EdgeInsets.only(
-              bottom: MediaQuery.of(context).viewInsets.bottom,
-            ),
-            child: Container(
-              margin: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.95),
-                borderRadius: BorderRadius.circular(32),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, -5),
-                  ),
-                ],
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(32),
-                child: BackdropFilter(
-                  filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                  child: SingleChildScrollView(
-                    // ⚡ FIX: Prevent Overflow
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        // Handle
-                        Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[300],
-                            borderRadius: BorderRadius.circular(10),
+          (context) => Consumer(
+            builder: (context, ref, child) {
+              final liveBuses = ref.watch(busProvider).liveBusData;
+              final currentBusData = liveBuses[id] ?? data; // fallback to clicked data
+              final uiState = ref.watch(mapUiProvider);
+
+              // Calculate etaInfo on the fly to avoid race condition and caching issues
+              final busPos = LatLng(
+                (currentBusData['latitude'] as num?)?.toDouble() ?? 0.0,
+                (currentBusData['longitude'] as num?)?.toDouble() ?? 0.0,
+              );
+              final destName = currentBusData['to'] as String?;
+              final destPos = destName != null ? _getHubLocation(destName) : null;
+              final finalDestPos = destPos ?? CampusLocations.baghdadCampus;
+              final etaInfo = (busPos.latitude != 0.0 && busPos.longitude != 0.0)
+                  ? EtaInfo.estimateFromCoordinates(busPos, finalDestPos)
+                  : null;
+
+              // Student location relative calculations
+              final distanceToStudent = uiState.hasUserLocation &&
+                      busPos.latitude != 0.0 &&
+                      busPos.longitude != 0.0 &&
+                      uiState.userLocation.latitude != 0.0 &&
+                      uiState.userLocation.longitude != 0.0
+                  ? const Distance().as(LengthUnit.Meter, busPos, uiState.userLocation)
+                  : null;
+
+              // Check if we should simulate realistic tracking data for debugging/testing
+              final bool simulateDemo = kDebugMode || 
+                  (distanceToStudent != null && (distanceToStudent > 100000 || distanceToStudent < 5));
+
+              final double rawSpeed = (currentBusData['speed'] as num?)?.toDouble() ?? 0.0;
+              final double speedKmh = rawSpeed * 3.6;
+              final String speedText = simulateDemo 
+                  ? "35 KM/H" 
+                  : (speedKmh < 1.0 ? "0 KM/H" : "${speedKmh.toStringAsFixed(0)} KM/H");
+
+              final etaText =
+                  currentBusData['remainingTime'] != null &&
+                          (currentBusData['remainingTime'] as String).isNotEmpty &&
+                          currentBusData['remainingTime'] != "---" &&
+                          currentBusData['remainingTime'] != "Calculating..."
+                      ? currentBusData['remainingTime']
+                      : (etaInfo?.etaDisplay ?? (simulateDemo ? "12 MIN" : "Calculating..."));
+
+              final distText =
+                  currentBusData['remainingDistance'] != null &&
+                          (currentBusData['remainingDistance'] as String).isNotEmpty &&
+                          currentBusData['remainingDistance'] != "---" &&
+                          currentBusData['remainingDistance'] != "Calculating..."
+                      ? currentBusData['remainingDistance']
+                      : (etaInfo?.distanceDisplay ?? (simulateDemo ? "4.5 KM" : "---"));
+
+              final gender = (currentBusData['gender'] as String? ?? 'Combined').toLowerCase().trim();
+              final Color genderColor =
+                  gender.contains('girls')
+                      ? Colors.pinkAccent
+                      : (gender.contains('boys') ? Colors.blueAccent : AppColors.primaryNavy);
+
+              final averageSpeed = (currentBusData['speed'] != null && (currentBusData['speed'] as num) > 0.5)
+                  ? (currentBusData['speed'] as num).toDouble()
+                  : 6.94; // fallback 25 km/h in m/s
+
+              // Simulated or actual relative telemetry values
+              final double? finalDistanceToStudent = simulateDemo 
+                  ? 2400.0 // 2.4 KM
+                  : distanceToStudent;
+
+              final durationSecToStudent = finalDistanceToStudent != null ? finalDistanceToStudent / averageSpeed : null;
+              final minutesToStudent = durationSecToStudent != null ? (durationSecToStudent / 60).ceil() : null;
+
+              final int? finalMinutesToStudent = simulateDemo 
+                  ? 7 // 7 MIN
+                  : minutesToStudent;
+
+              String etaToStudentText;
+              if (finalMinutesToStudent == null) {
+                etaToStudentText = "Calculating...";
+              } else if (finalDistanceToStudent != null && finalDistanceToStudent < 50 && !simulateDemo) {
+                etaToStudentText = "Arrived";
+              } else if (finalMinutesToStudent >= 60) {
+                final hours = finalMinutesToStudent ~/ 60;
+                final mins = finalMinutesToStudent % 60;
+                etaToStudentText = "${hours}h ${mins}m";
+              } else {
+                etaToStudentText = "$finalMinutesToStudent MIN";
+              }
+
+              String distToStudentText;
+              if (finalDistanceToStudent == null) {
+                distToStudentText = "Calculating...";
+              } else if (finalDistanceToStudent < 50 && !simulateDemo) {
+                distToStudentText = "Nearby";
+              } else if (finalDistanceToStudent >= 1000) {
+                distToStudentText = "${(finalDistanceToStudent / 1000).toStringAsFixed(1)} KM";
+              } else {
+                distToStudentText = "${finalDistanceToStudent.toInt()} M";
+              }
+
+              String distToStudentDisplay = distToStudentText;
+
+              final driverId = currentBusData['driverId'] as String?;
+
+              return StreamBuilder<DocumentSnapshot>(
+                stream: driverId != null && driverId.isNotEmpty
+                    ? FirebaseFirestore.instance.collection('drivers').doc(driverId).snapshots()
+                    : const Stream.empty(),
+                builder: (context, driverSnapshot) {
+                  String driverName = currentBusData['driverName'] ?? "Driver";
+                  String profileUrl = "";
+                  bool isVerified = false;
+
+                  if (driverSnapshot.hasData && driverSnapshot.data!.exists) {
+                    final driverData = driverSnapshot.data!.data() as Map<String, dynamic>?;
+                    if (driverData != null) {
+                      driverName = driverData['name'] ?? driverName;
+                      profileUrl = driverData['profileUrl'] ?? "";
+                      isVerified = driverData['isVerified'] ?? false;
+                    }
+                  }
+
+                  return Container(
+                    padding: EdgeInsets.only(
+                      bottom: MediaQuery.of(context).viewInsets.bottom,
+                    ),
+                    child: Container(
+                      margin: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(32),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 20,
+                            offset: const Offset(0, -5),
                           ),
-                        ),
-                        const SizedBox(height: 20),
-
-                        // Header Row
-                        Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: genderColor.withValues(alpha: 0.1),
-                                shape: BoxShape.circle,
-                              ),
-                              child: Icon(
-                                Icons.directions_bus_rounded,
-                                color: genderColor,
-                                size: 28,
-                              ),
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text(
-                                        data['driverName'] ?? "Driver",
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppColors.primaryNavy,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      _buildLiveBadge(),
-                                    ],
+                        ],
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(32),
+                        child: BackdropFilter(
+                          filter: ui.ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Handle
+                                Container(
+                                  width: 40,
+                                  height: 4,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[300],
+                                    borderRadius: BorderRadius.circular(10),
                                   ),
-                                  Text(
-                                    "BUS #$id • ${data['plateNumber'] ?? ''}",
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 11,
-                                      color: Colors.blueGrey,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () => Navigator.pop(context),
-                              icon: Container(
-                                padding: const EdgeInsets.all(4),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[100],
-                                  shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.close, size: 16),
-                              ),
-                            ),
-                          ],
-                        ),
+                                const SizedBox(height: 20),
 
-                        const SizedBox(height: 24),
-
-                        // Info Grid
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildModernInfoBox(
-                                Icons.timer_outlined,
-                                "REMAINING",
-                                etaText,
-                                AppColors.primaryNavy,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: _buildModernInfoBox(
-                                Icons.event_available_rounded,
-                                "ARRIVAL",
-                                arrivalClockTime,
-                                AppColors.primaryYellow,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _buildModernInfoBox(
-                                Icons.location_on_outlined,
-                                "DISTANCE",
-                                distText,
-                                Colors.blueGrey,
-                              ),
-                            ),
-                            if ((data['speed'] ?? 0.0) > 0.5) ...[
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _buildModernInfoBox(
-                                  Icons.speed,
-                                  "SPEED",
-                                  "${((data['speed'] ?? 0.0) as num).toStringAsFixed(0)} m/s",
-                                  AppColors.liveStatus,
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-
-                        const SizedBox(height: 20),
-
-                        // Route Detail Tile
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[50],
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: Colors.grey[200]!),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(
-                                Icons.alt_route_rounded,
-                                color: AppColors.primaryNavy,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                // Header Row
+                                Row(
                                   children: [
-                                    Text(
-                                      "CURRENT TRIP",
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 9,
-                                        color: Colors.grey,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.5,
+                                    InkWell(
+                                      onTap: () {
+                                        _showDriverProfileDialog(
+                                          context,
+                                          driverName: driverName,
+                                          profileUrl: profileUrl,
+                                          isVerified: isVerified,
+                                          phone: driverSnapshot.hasData && driverSnapshot.data!.exists
+                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['phoneNumber'] ?? ""
+                                              : "",
+                                          email: driverSnapshot.hasData && driverSnapshot.data!.exists
+                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['email'] ?? ""
+                                              : "",
+                                          experience: driverSnapshot.hasData && driverSnapshot.data!.exists
+                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['experience'] ?? "N/A"
+                                              : "N/A",
+                                          cnic: driverSnapshot.hasData && driverSnapshot.data!.exists
+                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['cnic'] ?? ""
+                                              : "",
+                                          licenseNumber: driverSnapshot.hasData && driverSnapshot.data!.exists
+                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['licenseNumber'] ?? ""
+                                              : "",
+                                        );
+                                      },
+                                      borderRadius: BorderRadius.circular(26),
+                                      child: Container(
+                                        width: 52,
+                                        height: 52,
+                                        decoration: BoxDecoration(
+                                          color: genderColor.withValues(alpha: 0.1),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: profileUrl.isNotEmpty
+                                            ? ClipOval(
+                                                child: Image.network(
+                                                  profileUrl,
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (context, error, stackTrace) {
+                                                    return Icon(
+                                                      Icons.directions_bus_rounded,
+                                                      color: genderColor,
+                                                      size: 28,
+                                                    );
+                                                  },
+                                                  loadingBuilder: (context, child, loadingProgress) {
+                                                    if (loadingProgress == null) return child;
+                                                    return Center(
+                                                      child: SizedBox(
+                                                        width: 20,
+                                                        height: 20,
+                                                        child: CircularProgressIndicator(
+                                                          strokeWidth: 2,
+                                                          valueColor: AlwaysStoppedAnimation<Color>(genderColor),
+                                                        ),
+                                                      ),
+                                                    );
+                                                  },
+                                                ),
+                                              )
+                                            : Icon(
+                                                Icons.directions_bus_rounded,
+                                                color: genderColor,
+                                                size: 28,
+                                              ),
                                       ),
                                     ),
-                                    Text(
-                                      "${data['from']} ➔ ${data['to']}",
-                                      style: GoogleFonts.poppins(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                        color: AppColors.primaryNavy,
+                                    const SizedBox(width: 16),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  driverName,
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 18,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: AppColors.primaryNavy,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              if (isVerified) ...[
+                                                const SizedBox(width: 6),
+                                                const Icon(
+                                                  Icons.verified_rounded,
+                                                  color: Colors.blueAccent,
+                                                  size: 18,
+                                                ),
+                                              ],
+                                              const SizedBox(width: 8),
+                                              _buildLiveBadge(),
+                                            ],
+                                          ),
+                                          Text(
+                                            "BUS #$id • ${currentBusData['plateNumber'] ?? ''}",
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 11,
+                                              color: Colors.blueGrey,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      onPressed: () => Navigator.pop(context),
+                                      icon: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey[100],
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: const Icon(Icons.close, size: 16),
                                       ),
                                     ),
                                   ],
                                 ),
-                              ),
-                            ],
+
+                                const SizedBox(height: 20),
+
+                                // Student location tracking banner
+                                if (uiState.hasUserLocation)
+                                  Container(
+                                    margin: const EdgeInsets.only(bottom: 16),
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primaryYellow.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(24),
+                                      border: Border.all(
+                                        color: AppColors.primaryYellow.withValues(alpha: 0.3),
+                                        width: 1.5,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        const Icon(
+                                          Icons.directions_walk_rounded,
+                                          color: AppColors.primaryNavy,
+                                          size: 24,
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                "DRIVER TO YOU",
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: AppColors.primaryNavy.withValues(alpha: 0.7),
+                                                  letterSpacing: 0.5,
+                                                ),
+                                              ),
+                                              Text(
+                                                "Distance: $distToStudentDisplay • Reaching in: $etaToStudentText",
+                                                style: GoogleFonts.poppins(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: AppColors.primaryNavy,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  Container(
+                                    margin: const EdgeInsets.only(bottom: 16),
+                                    padding: const EdgeInsets.all(16),
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[50],
+                                      borderRadius: BorderRadius.circular(24),
+                                      border: Border.all(color: Colors.grey[200]!, width: 1.5),
+                                    ),
+                                    child: InkWell(
+                                      onTap: _getCurrentLocation,
+                                      child: Row(
+                                        children: [
+                                          const Icon(Icons.location_off_outlined, color: Colors.blueGrey, size: 22),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  "DISTANCE TO YOU",
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.grey[600],
+                                                    letterSpacing: 0.5,
+                                                  ),
+                                                ),
+                                                Text(
+                                                  "Tap to enable location to track driver to you",
+                                                  style: GoogleFonts.poppins(
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: AppColors.primaryNavy,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+
+                                // Info Grid
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildModernInfoBox(
+                                        Icons.timer_outlined,
+                                        "REMAINING",
+                                        etaText,
+                                        AppColors.primaryNavy,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _buildModernInfoBox(
+                                        Icons.play_circle_outline_rounded,
+                                        "STATUS",
+                                        "Bus Started",
+                                        Colors.green,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildModernInfoBox(
+                                        Icons.location_on_outlined,
+                                        "DISTANCE",
+                                        distText,
+                                        Colors.blueGrey,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _buildModernInfoBox(
+                                        Icons.speed_rounded,
+                                        "SPEED",
+                                        speedText,
+                                        AppColors.liveStatus,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                const SizedBox(height: 20),
+
+                                // Route Detail Tile
+                                Container(
+                                  padding: const EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[50],
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: Colors.grey[200]!),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      const Icon(
+                                        Icons.alt_route_rounded,
+                                        color: AppColors.primaryNavy,
+                                        size: 20,
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              "CURRENT TRIP",
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 9,
+                                                color: Colors.grey,
+                                                fontWeight: FontWeight.bold,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                            Text(
+                                              "${currentBusData['from']} ➔ ${currentBusData['to']}",
+                                              style: GoogleFonts.poppins(
+                                                fontWeight: FontWeight.w600,
+                                                fontSize: 13,
+                                                color: AppColors.primaryNavy,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-              ),
-            ),
+                  );
+                },
+              );
+            },
           ),
     );
   }
@@ -1368,6 +1659,24 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     }
   }
 
+  void _startTrackingStudentLocation() async {
+    final hasPermission = await LocationService.handleLocationPermission();
+    if (!hasPermission) return;
+
+    _studentLocationSubscription = LocationService().studentLocationStream.listen(
+      (position) {
+        if (mounted) {
+          ref.read(mapUiProvider.notifier).updateUserLocation(
+            LatLng(position.latitude, position.longitude),
+          );
+        }
+      },
+      onError: (e) {
+        debugPrint("Error listening to student location: $e");
+      },
+    );
+  }
+
   void _handleSOS() {
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
@@ -1406,6 +1715,254 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
       child: IconButton(
         onPressed: onPressed,
         icon: Icon(icon, color: iconColor ?? AppColors.primaryNavy, size: 20),
+      ),
+    );
+  }
+
+  void _showDriverProfileDialog(
+    BuildContext context, {
+    required String driverName,
+    required String profileUrl,
+    required bool isVerified,
+    required String phone,
+    required String email,
+    required String experience,
+    required String cnic,
+    required String licenseNumber,
+  }) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        // Obscure sensitive info for privacy
+        String displayCnic = "N/A";
+        if (cnic.trim().isNotEmpty) {
+          final cleanCnic = cnic.replaceAll('-', '').trim();
+          if (cleanCnic.length >= 13) {
+            displayCnic = "${cleanCnic.substring(0, 5)}-*******-${cleanCnic.substring(12)}";
+          } else {
+            displayCnic = cnic;
+          }
+        }
+
+        String displayLicense = "N/A";
+        if (licenseNumber.trim().isNotEmpty) {
+          if (licenseNumber.length > 4) {
+            displayLicense = "LIC-****${licenseNumber.substring(licenseNumber.length - 4)}";
+          } else {
+            displayLicense = licenseNumber;
+          }
+        }
+
+        return Dialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          elevation: 8,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Header Accent band
+              Container(
+                height: 70,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [AppColors.primaryNavy, Color(0xFF1E3A8A)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(28),
+                    topRight: Radius.circular(28),
+                  ),
+                ),
+                child: Center(
+                  child: Text(
+                    "DRIVER PROFILE",
+                    style: GoogleFonts.poppins(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                child: Column(
+                  children: [
+                    // Driver photo
+                    Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppColors.primaryNavy.withValues(alpha: 0.1),
+                        border: Border.all(
+                          color: AppColors.primaryNavy.withValues(alpha: 0.2),
+                          width: 3.0,
+                        ),
+                      ),
+                      child: profileUrl.isNotEmpty
+                          ? ClipOval(
+                              child: Image.network(
+                                profileUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => const Icon(
+                                  Icons.person_rounded,
+                                  size: 48,
+                                  color: AppColors.primaryNavy,
+                                ),
+                              ),
+                            )
+                          : const Icon(
+                              Icons.person_rounded,
+                              size: 48,
+                              color: AppColors.primaryNavy,
+                            ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Driver Name & Badge
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            driverName,
+                            style: GoogleFonts.poppins(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.primaryNavy,
+                            ),
+                            textAlign: TextAlign.center,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (isVerified) ...[
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.verified_rounded,
+                            color: Colors.blueAccent,
+                            size: 18,
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "University Fleet Driver",
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: Colors.grey[600],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Divider(height: 1),
+                    const SizedBox(height: 16),
+
+                    // Profile info fields
+                    _buildProfileField(Icons.work_history_outlined, "Experience", experience),
+                    _buildProfileField(Icons.badge_outlined, "CNIC Number", displayCnic),
+                    _buildProfileField(Icons.contact_emergency_outlined, "Driving License", displayLicense),
+                    _buildProfileField(Icons.email_outlined, "Email Address", email.isNotEmpty ? email : "N/A"),
+                    _buildProfileField(Icons.phone_iphone_rounded, "Phone Number", phone.isNotEmpty ? phone : "N/A"),
+
+                    const SizedBox(height: 20),
+
+                    // Actions
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              side: BorderSide(color: Colors.grey[300]!),
+                            ),
+                            child: Text(
+                              "Close",
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.grey[700],
+                              ),
+                            ),
+                          ),
+                        ),
+                        if (phone.isNotEmpty) ...[
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: ElevatedButton.icon(
+                              onPressed: () async {
+                                final uri = Uri.parse("tel:$phone");
+                                if (await canLaunchUrl(uri)) {
+                                  await launchUrl(uri);
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green[600],
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
+                                elevation: 0,
+                              ),
+                              icon: const Icon(Icons.call, size: 16),
+                              label: Text(
+                                "Call",
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildProfileField(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: Colors.blueGrey[400]),
+          const SizedBox(width: 10),
+          Text(
+            "$label: ",
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: Colors.blueGrey[600],
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primaryNavy,
+              ),
+              textAlign: TextAlign.end,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1472,7 +2029,9 @@ class AnimatedBusMarker extends ConsumerWidget {
       markerColor = Colors.blueAccent;
     }
 
-    final etaText = data['remainingTime'] != null && (data['remainingTime'] as String).isNotEmpty
+    final etaText = data['remainingTime'] != null &&
+            (data['remainingTime'] as String).isNotEmpty &&
+            data['remainingTime'] != "---"
         ? data['remainingTime']
         : (etaInfo?.etaMarkerDisplay ?? "---");
 

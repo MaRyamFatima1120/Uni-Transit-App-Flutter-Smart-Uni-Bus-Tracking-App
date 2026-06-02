@@ -12,6 +12,7 @@ class SystemNotificationModel {
   final String? targetRole; // 'Student', 'Driver', or 'All'
   final String? alertId;
   final bool isReviewed;
+  final String? imageUrl;
 
   SystemNotificationModel({
     required this.id,
@@ -23,6 +24,7 @@ class SystemNotificationModel {
     this.targetRole = 'All',
     this.alertId,
     this.isReviewed = false,
+    this.imageUrl,
   });
 
   factory SystemNotificationModel.fromMap(Map<String, dynamic> map, String id) {
@@ -38,6 +40,7 @@ class SystemNotificationModel {
       targetRole: map['targetRole'] ?? 'All',
       alertId: map['alertId'],
       isReviewed: map['isReviewed'] ?? false,
+      imageUrl: map['imageUrl'] ?? map['image'],
     );
   }
 

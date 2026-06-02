@@ -153,7 +153,9 @@ class _StudentDrawerState extends ConsumerState<StudentDrawer> {
         _DrawerTile(icon: Icons.logout_rounded, title: "Sign Out", iconColor: AppColors.error, textColor: AppColors.error, onTap: _logout),
         const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Image.asset(AppAssets.iubLogo, height: 20), 
+          ClipOval(
+            child: Image.asset(AppAssets.iubLogo, height: 20, width: 20, fit: BoxFit.cover),
+          ), 
           const SizedBox(width: 10), 
           Text("UniTransit v1.2.0", style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey[400]))
         ]),

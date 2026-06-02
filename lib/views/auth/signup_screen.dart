@@ -110,7 +110,14 @@ class _SignUpScreenState extends ConsumerState<SignUpScreen> {
                         color: Colors.white.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: Image.asset(AppAssets.iubLogo, height: 80),
+                      child: ClipOval(
+                        child: Image.asset(
+                          AppAssets.iubLogo,
+                          height: 80,
+                          width: 80,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 24),
                     Text(

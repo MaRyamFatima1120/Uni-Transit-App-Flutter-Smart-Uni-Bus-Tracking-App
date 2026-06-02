@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:latlong2/latlong.dart';
 import '../core/constants/campus_locations.dart';
 import '../core/constants/custom_routes.dart';
@@ -56,25 +57,37 @@ class RouteNotifier extends Notifier<RouteState> {
   }
 
   void _listenToOfficialRoutes() {
-    final sub = FirebaseDatabase.instance
-        .ref('official_routes')
-        .onValue
-        .listen((event) {
-      final Map<String, dynamic> mergedRoutes = {
-        "Abbasia ➔ Baghdad": {
-          "from": CampusLocations.abbasiaName,
-          "to": CampusLocations.baghdadName,
-        },
-      };
+    final sub = FirebaseFirestore.instance
+        .collection('schedules')
+        .snapshots()
+        .listen((snapshot) {
+      final Map<String, dynamic> mergedRoutes = {};
 
-      if (event.snapshot.value != null) {
-        final rawData = Map<String, dynamic>.from(event.snapshot.value as Map);
-        rawData.forEach((key, value) {
-          String cleanKey = key.trim();
-          if (cleanKey != "Abbasia ➔ Baghdad" && cleanKey != "Abbasia -> Baghdad") {
-            mergedRoutes[cleanKey] = value;
-          }
-        });
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final route = data['route'] as String?;
+        final from = data['from'] as String?;
+        final to = data['to'] as String?;
+
+        // Filter: Only include master route templates (no date, no operatingDays, no specific departure time)
+        final date = data['date'] as String?;
+        final operatingDays = data['operatingDays'] as List?;
+        final departureTime = data['departureTime'] as String?;
+
+        final hasNoDate = date == null || date.isEmpty;
+        final hasNoOperatingDays = operatingDays == null || operatingDays.isEmpty;
+        final hasNoTime = departureTime == null ||
+            departureTime.isEmpty ||
+            departureTime == 'TBA' ||
+            departureTime == 'Live';
+
+        if (route != null && from != null && to != null && hasNoDate && hasNoOperatingDays && hasNoTime) {
+          String cleanKey = route.trim();
+          mergedRoutes[cleanKey] = {
+            "from": from,
+            "to": to,
+          };
+        }
       }
 
       state = state.copyWith(officialRoutes: mergedRoutes);

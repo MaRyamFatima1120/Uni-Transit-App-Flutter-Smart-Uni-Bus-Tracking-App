@@ -115,7 +115,8 @@ class CustomRoutes {
     
     // Check if it's Baghdad to Abbasia (reverse of Abbasia -> Baghdad)
     if (nameLower.contains('baghdad') && (nameLower.contains('abbasia') || nameLower.contains('abasia'))) {
-      if (nameLower.indexOf('baghdad') < nameLower.indexOf('aba')) {
+      final abbasiaIndex = nameLower.contains('abbasia') ? nameLower.indexOf('abbasia') : nameLower.indexOf('abasia');
+      if (nameLower.indexOf('baghdad') < abbasiaIndex) {
         // It's Baghdad -> Abbasia (Reversed)
         return manualPolylines["Abbasia ➔ Baghdad"]?.reversed.toList() ?? [];
       } else {

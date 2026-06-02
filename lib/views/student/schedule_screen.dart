@@ -1,19 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uni_transit/models/bus_schedule.dart';
 import 'package:uni_transit/services/schedule_service.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/views/student/map_screen.dart';
+import 'package:uni_transit/view_models/bus_provider.dart';
 
-class ScheduleScreen extends StatefulWidget {
+class ScheduleScreen extends ConsumerStatefulWidget {
   const ScheduleScreen({super.key});
 
   @override
-  State<ScheduleScreen> createState() => _ScheduleScreenState();
+  ConsumerState<ScheduleScreen> createState() => _ScheduleScreenState();
 }
 
-class _ScheduleScreenState extends State<ScheduleScreen> {
+class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
   final _scheduleService = ScheduleService();
   final _busesRef = FirebaseDatabase.instance.ref('buses');
   
@@ -21,7 +23,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   late DateTime _currentMonth;
   late ScrollController _calendarScrollController;
   String _selectedTypeFilter = 'All';
-
+  String _selectedSession = 'All'; // For Morning/Afternoon/Evening dropdown
   final List<String> _weekdays = [
     'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'
   ];
@@ -108,6 +110,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   @override
   Widget build(BuildContext context) {
     final days = _generateDaysInMonth(_currentMonth);
+    final genderConfigs = ref.watch(genderConfigProvider).genderConfigs;
+    final List<String> genders = ["All", ...genderConfigs.keys];
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -251,55 +255,100 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
 
           // Filters and Date Indicator Row
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '${_getWeekdayName(_selectedDate)}, ${_selectedDate.day} ${_getMonthName(_selectedDate).substring(0, 3)}',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: AppColors.primaryNavy,
-                  ),
-                ),
-                // Gender Filter Badges
                 Row(
-                  children: ['All', 'Boys', 'Girls'].map((filter) {
-                    final isSelected = (_selectedTypeFilter == filter) || 
-                        (_selectedTypeFilter == 'Boys Special' && filter == 'Boys') ||
-                        (_selectedTypeFilter == 'Girls Special' && filter == 'Girls');
-                        
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          if (filter == 'All') {
-                            _selectedTypeFilter = 'All';
-                          } else if (filter == 'Boys') {
-                            _selectedTypeFilter = 'Boys Special';
-                          } else if (filter == 'Girls') {
-                            _selectedTypeFilter = 'Girls Special';
-                          }
-                        });
-                      },
-                      child: Container(
-                        margin: const EdgeInsets.only(left: 6),
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: isSelected ? AppColors.primaryYellow : Colors.grey[100],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          filter,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${_getWeekdayName(_selectedDate)}, ${_selectedDate.day} ${_getMonthName(_selectedDate).substring(0, 3)}',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: AppColors.primaryNavy,
+                      ),
+                    ),
+                    // Session Dropdown
+                    Container(
+                      height: 32,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey[100],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.grey[300]!),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: _selectedSession,
+                          icon: const Icon(Icons.arrow_drop_down, size: 20, color: AppColors.primaryNavy),
                           style: GoogleFonts.poppins(
                             fontWeight: FontWeight.bold,
-                            fontSize: 10,
-                            color: isSelected ? AppColors.textDark : AppColors.textSecondary,
+                            fontSize: 11,
+                            color: AppColors.primaryNavy,
                           ),
+                          onChanged: (String? newValue) {
+                            if (newValue != null) {
+                              setState(() {
+                                _selectedSession = newValue;
+                              });
+                            }
+                          },
+                          items: <String>['All', 'Morning', 'Afternoon', 'Evening']
+                              .map<DropdownMenuItem<String>>((String value) {
+                            return DropdownMenuItem<String>(
+                              value: value,
+                              child: Text(value),
+                            );
+                          }).toList(),
                         ),
                       ),
-                    );
-                  }).toList(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Gender Filter Badges
+                SizedBox(
+                  height: 38,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: genders.length,
+                    itemBuilder: (context, index) {
+                      final filter = genders[index];
+                      final isSelected = _selectedTypeFilter == filter;
+
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedTypeFilter = filter;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: isSelected ? AppColors.primaryYellow : Colors.grey[100],
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isSelected ? AppColors.primaryYellow : Colors.grey[300]!,
+                              ),
+                            ),
+                            child: Text(
+                              filter,
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 11,
+                                color: isSelected ? AppColors.primaryNavy : AppColors.textSecondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ],
             ),
@@ -332,9 +381,16 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     final selectedDayName = _getWeekdayName(_selectedDate);
 
                     final filteredSchedules = allSchedules.where((schedule) {
+                      // 0. Filter out TBA placeholders
+                      if (schedule.busNumber == 'TBA' || schedule.departureTime == 'TBA') {
+                        return false;
+                      }
+
                       // 1. Filter by Type (Gender)
                       if (_selectedTypeFilter != 'All') {
-                        if (schedule.type != _selectedTypeFilter) {
+                        final typeLower = schedule.type.toLowerCase();
+                        final filterLower = _selectedTypeFilter.toLowerCase();
+                        if (!typeLower.contains(filterLower) && !filterLower.contains(typeLower)) {
                           return false;
                         }
                       }
@@ -369,11 +425,11 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
                     return ListView(
                       padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
                       children: [
-                        if (shiftGroups['Morning']!.isNotEmpty)
+                        if ((_selectedSession == 'All' || _selectedSession == 'Morning') && shiftGroups['Morning']!.isNotEmpty)
                           _buildMobileShiftTable(context, 'MORNING SESSION', shiftGroups['Morning']!, activeBuses),
-                        if (shiftGroups['Afternoon']!.isNotEmpty)
+                        if ((_selectedSession == 'All' || _selectedSession == 'Afternoon') && shiftGroups['Afternoon']!.isNotEmpty)
                           _buildMobileShiftTable(context, 'AFTERNOON SESSION', shiftGroups['Afternoon']!, activeBuses),
-                        if (shiftGroups['Evening']!.isNotEmpty)
+                        if ((_selectedSession == 'All' || _selectedSession == 'Evening') && shiftGroups['Evening']!.isNotEmpty)
                           _buildMobileShiftTable(context, 'EVENING SESSION', shiftGroups['Evening']!, activeBuses),
                       ],
                     );
@@ -498,9 +554,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
               final isLive = liveBusId != null;
 
               Color typeColor = AppColors.primaryNavy;
-              if (schedule.type.contains('Girls')) {
+              final typeLower = schedule.type.toLowerCase();
+              if (typeLower.contains('girls')) {
                 typeColor = AppColors.girlsSpecial;
-              } else if (schedule.type.contains('Boys')) {
+              } else if (typeLower.contains('boys')) {
                 typeColor = AppColors.boysSpecial;
               }
 

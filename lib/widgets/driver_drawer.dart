@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/core/constants/app_assets.dart';
 import 'package:uni_transit/view_models/auth_provider.dart';
+import 'package:uni_transit/view_models/driver_trip_provider.dart';
 import 'package:uni_transit/views/driver/trip_history_screen.dart';
 import 'package:uni_transit/views/driver/assigned_routes_screen.dart';
 
@@ -30,6 +31,7 @@ class _DriverDrawerState extends ConsumerState<DriverDrawer> {
     );
 
     if (confirmed == true) {
+      ref.invalidate(driverTripProvider);
       ref.read(authStateProvider.notifier).logout();
       if (mounted) Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
     }
@@ -65,8 +67,25 @@ class _DriverDrawerState extends ConsumerState<DriverDrawer> {
             const SizedBox(height: 20),
             _buildSectionTitle("DRIVER PANEL"),
             _DrawerTile(icon: Icons.dashboard_rounded, title: "Trip Dashboard", onTap: () {
-              Navigator.pop(context);
-              Navigator.pushNamedAndRemoveUntil(context, '/driver_dashboard', (r) => false);
+              Navigator.pop(context); // Close the drawer
+              
+              final currentRoute = ModalRoute.of(context)?.settings.name;
+              if (currentRoute == '/driver_dashboard') {
+                return; // Already on dashboard, do nothing
+              }
+
+              bool hasDashboard = false;
+              Navigator.popUntil(context, (route) {
+                if (route.settings.name == '/driver_dashboard') {
+                  hasDashboard = true;
+                  return true;
+                }
+                return route.isFirst;
+              });
+
+              if (!hasDashboard) {
+                Navigator.pushNamedAndRemoveUntil(context, '/driver_dashboard', (r) => false);
+              }
             }),
             _DrawerTile(icon: Icons.history_rounded, title: "My Trip History", onTap: () {
               Navigator.pop(context);
@@ -160,7 +179,9 @@ class _DriverDrawerState extends ConsumerState<DriverDrawer> {
         _DrawerTile(icon: Icons.logout_rounded, title: "Sign Out", iconColor: AppColors.error, textColor: AppColors.error, onTap: _logout),
         const SizedBox(height: 12),
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Image.asset(AppAssets.iubLogo, height: 20), 
+          ClipOval(
+            child: Image.asset(AppAssets.iubLogo, height: 20, width: 20, fit: BoxFit.cover),
+          ), 
           const SizedBox(width: 10), 
           Text("Driver Edition v1.2.0", style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: Colors.grey[400]))
         ]),

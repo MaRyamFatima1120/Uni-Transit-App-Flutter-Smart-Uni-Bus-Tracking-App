@@ -11,6 +11,7 @@ import 'package:uni_transit/core/util/logger.dart';
 import 'package:uni_transit/core/constants/campus_locations.dart';
 import 'package:uni_transit/services/trip_alert_service.dart';
 import 'package:uni_transit/core/constants/custom_routes.dart';
+import 'package:uni_transit/models/eta_info.dart';
 
 class DriverTripState {
   final bool isTripStarted;
@@ -121,6 +122,7 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
         heading,
         speed: speed,
         remainingTime: state.remainingTime,
+        remainingDistance: state.remainingDistance,
         arrivalTime:
             state.remainingTime != "---"
                 ? _calculateClockTime(state.remainingTime)
@@ -131,7 +133,16 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
 
   String _calculateClockTime(String remainingStr) {
     try {
-      final minutes = int.parse(remainingStr.split(' ')[0]);
+      int minutes = 0;
+      if (remainingStr.contains('h')) {
+        final parts = remainingStr.split('h');
+        final hours = int.parse(parts[0].trim());
+        final minsStr = parts[1].replaceAll('m', '').trim();
+        final mins = minsStr.isNotEmpty ? int.parse(minsStr) : 0;
+        minutes = (hours * 60) + mins;
+      } else {
+        minutes = int.parse(remainingStr.split(' ')[0]);
+      }
       final arrival = DateTime.now().add(Duration(minutes: minutes));
       return DateFormat('hh:mm a').format(arrival);
     } catch (e) {
@@ -214,6 +225,10 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
         ? state.currentLocation 
         : (startHubCoord ?? state.currentLocation);
 
+    final fallbackEta = EtaInfo.estimateFromCoordinates(origin, target);
+    final fallbackDistance = fallbackEta.distanceDisplay;
+    final fallbackTime = fallbackEta.etaDisplay;
+
     if (manualPoints.isNotEmpty && manualPoints.length > 2) {
       // ⚡ PROFESSIONAL: Use manual points for the map path
       final routeData = await RoutingService.getFullRoute([
@@ -225,11 +240,11 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
         remainingDistance:
             routeData != null
                 ? "${(routeData.distanceMeters / 1000).toStringAsFixed(1)} KM"
-                : state.remainingDistance,
+                : (state.remainingDistance != "---" ? state.remainingDistance : fallbackDistance),
         remainingTime:
             routeData != null
                 ? "${(routeData.durationSeconds / 60).ceil()} MIN"
-                : state.remainingTime,
+                : (state.remainingTime != "---" ? state.remainingTime : fallbackTime),
       );
     } else {
       // Fallback to OSRM if no manual points are defined
@@ -244,7 +259,29 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
               "${(routeData.distanceMeters / 1000).toStringAsFixed(1)} KM",
           remainingTime: "${(routeData.durationSeconds / 60).ceil()} MIN",
         );
+      } else {
+        state = state.copyWith(
+          remainingDistance: state.remainingDistance != "---" ? state.remainingDistance : fallbackDistance,
+          remainingTime: state.remainingTime != "---" ? state.remainingTime : fallbackTime,
+        );
       }
+    }
+
+    // ⚡ UPDATE FIREBASE: Push the freshly calculated remainingTime, remainingDistance and arrivalTime to Firebase immediately
+    if (state.isTripStarted) {
+      final arrivalTime = state.remainingTime != "---" && state.remainingTime != "Calculating..."
+          ? _calculateClockTime(state.remainingTime)
+          : "Calculating...";
+      await _locationService.updateTracking(
+        state.busNumber,
+        state.currentLocation.latitude,
+        state.currentLocation.longitude,
+        state.heading,
+        speed: state.speed,
+        remainingTime: state.remainingTime,
+        remainingDistance: state.remainingDistance,
+        arrivalTime: arrivalTime,
+      );
     }
   }
 
@@ -264,6 +301,33 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
         final pos = await Geolocator.getCurrentPosition();
         final nowFormatted = DateFormat('hh:mm a').format(DateTime.now());
 
+        // ⚡ UX OPTIMIZATION: Calculate straight-line estimates immediately to prevent initial empty or "---" fields in student dashboard
+        String initialTime = "---";
+        String initialDistance = "---";
+        String initialArrival = "Arrival Pending";
+        
+        final startLatLng = LatLng(pos.latitude, pos.longitude);
+        final targetHubCoord = _getHubCoord(state.to!);
+        if (targetHubCoord != null) {
+          final initialEta = EtaInfo.estimateFromCoordinates(startLatLng, targetHubCoord);
+          initialTime = initialEta.etaDisplay;
+          initialDistance = initialEta.distanceDisplay;
+          try {
+            int minutes = 0;
+            if (initialTime.contains('h')) {
+              final parts = initialTime.split('h');
+              final hours = int.parse(parts[0].trim());
+              final minsStr = parts[1].replaceAll('m', '').trim();
+              final mins = minsStr.isNotEmpty ? int.parse(minsStr) : 0;
+              minutes = (hours * 60) + mins;
+            } else {
+              minutes = int.parse(initialTime.split(' ')[0]);
+            }
+            final arrival = DateTime.now().add(Duration(minutes: minutes));
+            initialArrival = DateFormat('hh:mm a').format(arrival);
+          } catch (_) {}
+        }
+
         await _locationService.startSharingLocation(
           uid,
           state.busNumber,
@@ -272,16 +336,20 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
           gender: state.gender,
           driverName: driverName,
           departureTime: nowFormatted,
-          arrivalTime: "Arrival Pending",
+          arrivalTime: initialArrival,
           plateNumber: state.plateNumber,
           lat: pos.latitude,
           lng: pos.longitude,
+          remainingTime: initialTime,
+          remainingDistance: initialDistance,
         );
 
         final activeTrip = await _locationService.getActiveTrip(uid);
         state = state.copyWith(
           isTripStarted: true,
           activeTripId: activeTrip?['tripId'],
+          remainingTime: initialTime,
+          remainingDistance: initialDistance,
         );
 
         // ⚡ PROFESSIONAL: Publish trip alert for students and Admin Panel

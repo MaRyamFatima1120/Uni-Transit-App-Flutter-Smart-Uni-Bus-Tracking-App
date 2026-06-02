@@ -42,12 +42,15 @@ class AboutScreen extends ConsumerWidget {
                           )
                         ],
                       ),
-                      child: appInfo.appLogoUrl.isNotEmpty 
-                        ? Image.network(
-                            appInfo.appLogoUrl,
-                            errorBuilder: (context, error, stackTrace) => Image.asset(AppAssets.iubLogo),
-                          )
-                        : Image.asset(AppAssets.iubLogo),
+                      child: ClipOval(
+                        child: appInfo.appLogoUrl.isNotEmpty 
+                          ? Image.network(
+                              appInfo.appLogoUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Image.asset(AppAssets.iubLogo, fit: BoxFit.cover),
+                            )
+                          : Image.asset(AppAssets.iubLogo, fit: BoxFit.cover),
+                      ),
                     ),
                   ),
                 ),

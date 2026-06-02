@@ -56,7 +56,10 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final user = _authService.currentUser;
       if (user != null) {
-        ref.read(driverTripProvider.notifier).restoreActiveTrip(user.uid);
+        final tripState = ref.read(driverTripProvider);
+        if (!tripState.isTripStarted && !tripState.hasRestored) {
+          ref.read(driverTripProvider.notifier).restoreActiveTrip(user.uid);
+        }
       }
       _initLocationTracking();
       _checkForPendingSosReviews();
@@ -1548,8 +1551,7 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
           children: [
             _buildActiveInfo("DISTANCE", state.remainingDistance), 
             _buildActiveInfo("ETA", state.remainingTime), 
-            if (state.speed > 0.5) 
-              _buildActiveInfo("SPEED", "${state.speed.toStringAsFixed(0)} m/s"), 
+            _buildActiveInfo("SPEED", "${(state.speed * 3.6).toStringAsFixed(0)} KM/H"), 
             _buildActiveInfo("TRACKING", "LIVE"),
           ]
         ),

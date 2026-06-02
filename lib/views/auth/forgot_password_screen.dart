@@ -90,9 +90,16 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                         color: Colors.white.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
-                      child: Hero(
-                        tag: 'app_logo',
-                        child: Image.asset(AppAssets.iubLogo, height: 100),
+                      child: ClipOval(
+                        child: Hero(
+                          tag: 'app_logo',
+                          child: Image.asset(
+                            AppAssets.iubLogo,
+                            height: 100,
+                            width: 100,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 24),
