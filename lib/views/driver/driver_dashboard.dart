@@ -336,6 +336,36 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
     return false;
   }
 
+  bool _isTripSoon(String timeStr) {
+    if (timeStr.isEmpty || timeStr.toLowerCase() == 'pending') return false;
+    final now = DateTime.now();
+    try {
+      int hour = 0;
+      int minute = 0;
+
+      final isPM = timeStr.toLowerCase().contains('pm');
+      final isAM = timeStr.toLowerCase().contains('am');
+      
+      final cleanTime = timeStr.replaceAll(RegExp(r'[^0-9:]'), '');
+      final parts = cleanTime.split(':');
+      if (parts.length >= 2) {
+        hour = int.tryParse(parts[0]) ?? 0;
+        minute = int.tryParse(parts[1]) ?? 0;
+        
+        if (isPM && hour < 12) hour += 12;
+        if (isAM && hour == 12) hour = 0;
+        
+        final scheduleTime = DateTime(now.year, now.month, now.day, hour, minute);
+        final difference = scheduleTime.difference(now);
+        // Alert if the trip starts within the next 60 minutes, and has not passed yet
+        return difference.inMinutes >= 0 && difference.inMinutes <= 60;
+      }
+    } catch (e) {
+      debugPrint("Error checking if trip is soon: $e");
+    }
+    return false;
+  }
+
   void _checkAndShowUpcomingTripPrompt(Map<String, dynamic>? driverData, dynamic allSchedules) {
     if (driverData == null || allSchedules == null) return;
     
@@ -395,9 +425,9 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
 
       if (!isToday) return false;
 
-      // Check if time has already passed
+      // Check if time has already passed or if trip starts soon (within 60 minutes)
       final depTime = schedule.departureTime?.toString() ?? '';
-      if (_isTimePassed(depTime)) return false;
+      if (!_isTripSoon(depTime)) return false;
 
       return true;
     }).toList();
@@ -744,8 +774,8 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
         "to='${tripState.to}', "
         "isLoading=${tripState.isLoading}");
 
-    // Guard: If state is loading, return a loading indicator instead of building layout.
-    if (tripState.isLoading) {
+    // Guard: If state is loading or active trip check hasn't finished, return a loading indicator instead of building layout.
+    if (tripState.isLoading || !tripState.hasRestored) {
       return const Scaffold(
         backgroundColor: Colors.white,
         body: Center(
@@ -873,7 +903,11 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
 
             Positioned(
               right: 20, 
-              bottom: MediaQuery.of(context).size.height * (tripState.isTripStarted ? 0.35 : 0.6) + 20, 
+              bottom: MediaQuery.of(context).size.height * (
+                tripState.isTripStarted 
+                    ? 0.35 
+                    : ((tripState.from != null && tripState.to != null && tripState.busNumber.isNotEmpty) ? 0.48 : 0.35)
+              ) + 10, 
               child: Column(
                 children: [
                   Stack(

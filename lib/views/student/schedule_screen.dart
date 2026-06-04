@@ -7,6 +7,8 @@ import 'package:uni_transit/services/schedule_service.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:uni_transit/views/student/map_screen.dart';
 import 'package:uni_transit/view_models/bus_provider.dart';
+import 'package:uni_transit/views/student/student_dashboard.dart';
+import 'package:uni_transit/view_models/route_provider.dart';
 
 class ScheduleScreen extends ConsumerStatefulWidget {
   const ScheduleScreen({super.key});
@@ -357,81 +359,93 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
           // Bus Schedules List
           Expanded(
             child: StreamBuilder<DatabaseEvent>(
-              stream: _busesRef.onValue,
-              builder: (context, liveSnapshot) {
-                Map<dynamic, dynamic> activeBuses = {};
-                if (liveSnapshot.hasData && liveSnapshot.data!.snapshot.value != null) {
+              stream: FirebaseDatabase.instance.ref('driver_trips').onValue,
+              builder: (context, tripsSnapshot) {
+                Map<dynamic, dynamic> driverTrips = {};
+                if (tripsSnapshot.hasData && tripsSnapshot.data!.snapshot.value != null) {
                   try {
-                    activeBuses = liveSnapshot.data!.snapshot.value as Map<dynamic, dynamic>;
+                    driverTrips = tripsSnapshot.data!.snapshot.value as Map<dynamic, dynamic>;
                   } catch (_) {}
                 }
 
-                return StreamBuilder<List<BusSchedule>>(
-                  stream: _scheduleService.getSchedules(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
-                      return const Center(child: CircularProgressIndicator(color: AppColors.primaryNavy));
+                return StreamBuilder<DatabaseEvent>(
+                  stream: _busesRef.onValue,
+                  builder: (context, liveSnapshot) {
+                    Map<dynamic, dynamic> activeBuses = {};
+                    if (liveSnapshot.hasData && liveSnapshot.data!.snapshot.value != null) {
+                      try {
+                        activeBuses = liveSnapshot.data!.snapshot.value as Map<dynamic, dynamic>;
+                      } catch (_) {}
                     }
-                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                      return _buildEmptyState();
-                    }
 
-                    final allSchedules = snapshot.data!;
-                    final selectedDateStr = _formatDate(_selectedDate);
-                    final selectedDayName = _getWeekdayName(_selectedDate);
-
-                    final filteredSchedules = allSchedules.where((schedule) {
-                      // 0. Filter out TBA placeholders
-                      if (schedule.busNumber == 'TBA' || schedule.departureTime == 'TBA') {
-                        return false;
-                      }
-
-                      // 1. Filter by Type (Gender)
-                      if (_selectedTypeFilter != 'All') {
-                        final typeLower = schedule.type.toLowerCase();
-                        final filterLower = _selectedTypeFilter.toLowerCase();
-                        if (!typeLower.contains(filterLower) && !filterLower.contains(typeLower)) {
-                          return false;
+                    return StreamBuilder<List<BusSchedule>>(
+                      stream: _scheduleService.getSchedules(),
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState == ConnectionState.waiting) {
+                          return const Center(child: CircularProgressIndicator(color: AppColors.primaryNavy));
                         }
-                      }
+                        if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                          return _buildEmptyState();
+                        }
 
-                      // 2. Filter by Date or Days
-                      if (schedule.date != null && schedule.date!.isNotEmpty) {
-                        return schedule.date == selectedDateStr;
-                      }
-                      if (schedule.operatingDays != null && schedule.operatingDays!.isNotEmpty) {
-                        return schedule.operatingDays!.contains(selectedDayName);
-                      }
-                      // Default Daily schedules do not run on weekends (Saturday & Sunday)
-                      return selectedDayName != 'Saturday' && selectedDayName != 'Sunday';
-                    }).toList();
+                        final allSchedules = snapshot.data!;
+                        final selectedDateStr = _formatDate(_selectedDate);
+                        final selectedDayName = _getWeekdayName(_selectedDate);
 
-                    if (filteredSchedules.isEmpty) {
-                      return _buildEmptyState();
-                    }
+                        final filteredSchedules = allSchedules.where((schedule) {
+                          // 0. Filter out TBA placeholders
+                          if (schedule.busNumber == 'TBA' || schedule.departureTime == 'TBA') {
+                            return false;
+                          }
 
-                    // Group schedules by Shift
-                    final Map<String, List<BusSchedule>> shiftGroups = {
-                      'Morning': [],
-                      'Afternoon': [],
-                      'Evening': [],
-                    };
+                          // 1. Filter by Type (Gender)
+                          if (_selectedTypeFilter != 'All') {
+                            final typeLower = schedule.type.toLowerCase();
+                            final filterLower = _selectedTypeFilter.toLowerCase();
+                            if (!typeLower.contains(filterLower) && !filterLower.contains(typeLower)) {
+                              return false;
+                            }
+                          }
 
-                    for (var schedule in filteredSchedules) {
-                      final shift = _getShift(schedule.departureTime);
-                      shiftGroups[shift]!.add(schedule);
-                    }
+                          // 2. Filter by Date or Days
+                          if (schedule.date != null && schedule.date!.isNotEmpty) {
+                            return schedule.date == selectedDateStr;
+                          }
+                          if (schedule.operatingDays != null && schedule.operatingDays!.isNotEmpty) {
+                            return schedule.operatingDays!.contains(selectedDayName);
+                          }
+                          // Default Daily schedules do not run on weekends (Saturday & Sunday)
+                          return selectedDayName != 'Saturday' && selectedDayName != 'Sunday';
+                        }).toList();
 
-                    return ListView(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
-                      children: [
-                        if ((_selectedSession == 'All' || _selectedSession == 'Morning') && shiftGroups['Morning']!.isNotEmpty)
-                          _buildMobileShiftTable(context, 'MORNING SESSION', shiftGroups['Morning']!, activeBuses),
-                        if ((_selectedSession == 'All' || _selectedSession == 'Afternoon') && shiftGroups['Afternoon']!.isNotEmpty)
-                          _buildMobileShiftTable(context, 'AFTERNOON SESSION', shiftGroups['Afternoon']!, activeBuses),
-                        if ((_selectedSession == 'All' || _selectedSession == 'Evening') && shiftGroups['Evening']!.isNotEmpty)
-                          _buildMobileShiftTable(context, 'EVENING SESSION', shiftGroups['Evening']!, activeBuses),
-                      ],
+                        if (filteredSchedules.isEmpty) {
+                          return _buildEmptyState();
+                        }
+
+                        // Group schedules by Shift
+                        final Map<String, List<BusSchedule>> shiftGroups = {
+                          'Morning': [],
+                          'Afternoon': [],
+                          'Evening': [],
+                        };
+
+                        for (var schedule in filteredSchedules) {
+                          final shift = _getShift(schedule.departureTime);
+                          shiftGroups[shift]!.add(schedule);
+                        }
+
+                        return ListView(
+                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                          children: [
+                            if ((_selectedSession == 'All' || _selectedSession == 'Morning') && shiftGroups['Morning']!.isNotEmpty)
+                              _buildMobileShiftTable(context, 'MORNING SESSION', shiftGroups['Morning']!, activeBuses, driverTrips, selectedDateStr),
+                            if ((_selectedSession == 'All' || _selectedSession == 'Afternoon') && shiftGroups['Afternoon']!.isNotEmpty)
+                              _buildMobileShiftTable(context, 'AFTERNOON SESSION', shiftGroups['Afternoon']!, activeBuses, driverTrips, selectedDateStr),
+                            if ((_selectedSession == 'All' || _selectedSession == 'Evening') && shiftGroups['Evening']!.isNotEmpty)
+                              _buildMobileShiftTable(context, 'EVENING SESSION', shiftGroups['Evening']!, activeBuses, driverTrips, selectedDateStr),
+                          ],
+                        );
+                      },
                     );
                   },
                 );
@@ -448,6 +462,8 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
     String title,
     List<BusSchedule> schedules,
     Map<dynamic, dynamic> activeBuses,
+    Map<dynamic, dynamic> driverTrips,
+    String selectedDateStr,
   ) {
     schedules.sort((a, b) => a.departureTime.compareTo(b.departureTime));
 
@@ -538,6 +554,28 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
             itemBuilder: (context, index) {
               final schedule = schedules[index];
 
+              // Find if there is any trip in driverTrips matching this schedule.id and selectedDateStr
+              String scheduleStatus = 'UPCOMING'; // UPCOMING, ACTIVE, COMPLETED
+              
+              driverTrips.forEach((driverId, tripsMap) {
+                if (tripsMap is Map) {
+                  tripsMap.forEach((tripId, tripData) {
+                    if (tripData is Map) {
+                      final tSchedId = tripData['scheduleId']?.toString() ?? '';
+                      final tDateStr = tripData['date']?.toString() ?? '';
+                      if (tSchedId == schedule.id && tDateStr == selectedDateStr) {
+                        final statusVal = (tripData['status']?.toString() ?? '').toLowerCase();
+                        if (statusVal == 'active') {
+                          scheduleStatus = 'ACTIVE';
+                        } else if (statusVal == 'completed' && scheduleStatus != 'ACTIVE') {
+                          scheduleStatus = 'COMPLETED';
+                        }
+                      }
+                    }
+                  });
+                }
+              });
+
               // Check if any bus in this schedule is live
               String? liveBusId;
               List<String> scheduledBuses = schedule.busNumber
@@ -551,7 +589,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                   break;
                 }
               }
-              final isLive = liveBusId != null;
+              final isLive = liveBusId != null || scheduleStatus == 'ACTIVE';
 
               Color typeColor = AppColors.primaryNavy;
               final typeLower = schedule.type.toLowerCase();
@@ -563,7 +601,10 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
 
               return InkWell(
                 onTap: isLive ? () {
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => const MapScreen()));
+                  // Select the route in the routeProvider so MapScreen filters/zooms to it
+                  ref.read(routeProvider.notifier).selectRoute(schedule.route);
+                  // Switch the bottom navigation tab to Live Tracking (index 0)
+                  ref.read(studentNavIndexProvider.notifier).setIndex(0);
                 } : null,
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
@@ -573,7 +614,7 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                       Expanded(
                         flex: 3,
                         child: Text(
-                          schedule.departureTime,
+                           schedule.departureTime,
                           style: GoogleFonts.poppins(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
@@ -647,11 +688,30 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                                     color: Colors.greenAccent[700],
                                   ),
                                 )
-                              : Icon(
-                                  Icons.gps_off_rounded,
-                                  size: 14,
-                                  color: Colors.grey[300],
-                                ),
+                              : (scheduleStatus == 'COMPLETED'
+                                  ? Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.withValues(alpha: 0.08),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: Colors.green.withValues(alpha: 0.2),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        "Done",
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 8,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.green[700],
+                                        ),
+                                      ),
+                                    )
+                                  : Icon(
+                                      Icons.gps_off_rounded,
+                                      size: 14,
+                                      color: Colors.grey[300],
+                                    )),
                         ),
                       ),
                     ],

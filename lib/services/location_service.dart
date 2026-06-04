@@ -87,9 +87,11 @@ class LocationService {
     String plateNumber = "",
     String remainingTime = "Calculating...",
     String remainingDistance = "Calculating...",
+    String scheduleId = "",
   }) async {
 
     final tripId = DateTime.now().millisecondsSinceEpoch.toString();
+    final todayStr = DateTime.now().toIso8601String().substring(0, 10); // YYYY-MM-DD
     
     // Validate inputs before writing to RTDB
     if (busNumber.trim().isEmpty) {
@@ -116,11 +118,14 @@ class LocationService {
       'arrivalTime': arrivalTime,
       'remainingTime': remainingTime,
       'remainingDistance': remainingDistance,
+      'scheduleId': scheduleId,
+      'tripId': tripId,
       'lastUpdated': ServerValue.timestamp,
     });
 
     await _tripsRef.child(uid).child(tripId).set({
       'tripId': tripId,
+      'driverName': driverName,
       'busNumber': busNumber,
       'plateNumber': plateNumber,
       'from': from,
@@ -128,6 +133,8 @@ class LocationService {
       'gender': gender,
       'startTime': ServerValue.timestamp,
       'status': 'active',
+      'scheduleId': scheduleId,
+      'date': todayStr,
     });
 
     // ⚡ REAL-TIME SYNC: Update Firestore status so Admin Panel sees driver as Online
@@ -135,6 +142,46 @@ class LocationService {
       await FirebaseFirestore.instance.collection('drivers').doc(uid).update({'status': 'Online'});
     } catch (e) {
       AppLogger.warning("Failed to update Firestore status to Online: $e");
+    }
+
+    // Write to Firestore 'trips' collection
+    try {
+      await FirebaseFirestore.instance.collection('trips').doc(tripId).set({
+        'tripId': tripId,
+        'driverId': uid,
+        'driverName': driverName,
+        'busNumber': busNumber,
+        'plateNumber': plateNumber,
+        'from': from,
+        'to': to,
+        'gender': gender,
+        'startTime': FieldValue.serverTimestamp(),
+        'status': 'active',
+        'scheduleId': scheduleId,
+        'date': todayStr,
+      });
+    } catch (e) {
+      AppLogger.warning("Failed to write to Firestore trips collection: $e");
+    }
+
+    // Write to Firestore 'active_trips' collection
+    try {
+      await FirebaseFirestore.instance.collection('active_trips').doc(tripId).set({
+        'tripId': tripId,
+        'driverId': uid,
+        'driverName': driverName,
+        'busNumber': busNumber,
+        'plateNumber': plateNumber,
+        'from': from,
+        'to': to,
+        'gender': gender,
+        'startTime': FieldValue.serverTimestamp(),
+        'status': 'active',
+        'scheduleId': scheduleId,
+        'date': todayStr,
+      });
+    } catch (e) {
+      AppLogger.warning("Failed to write to Firestore active_trips collection: $e");
     }
   }
 
@@ -175,7 +222,18 @@ class LocationService {
     // 1. Remove the live bus entry
     await _busesRef.child(busNumber).remove();
     
-    // 2. Mark the specific trip as completed
+    // Fetch trip details from RTDB first so we can write to Firestore completed_trips with full info
+    Map<String, dynamic>? tripData;
+    try {
+      final tripSnap = await _tripsRef.child(uid).child(tripId).get();
+      if (tripSnap.exists) {
+        tripData = Map<String, dynamic>.from(tripSnap.value as Map);
+      }
+    } catch (e) {
+      AppLogger.warning("Failed to fetch trip details from RTDB for Firestore sync: $e");
+    }
+
+    // 2. Mark the specific trip as completed in RTDB
     await _tripsRef.child(uid).child(tripId).update({
       'endTime': ServerValue.timestamp,
       'status': 'completed',
@@ -188,6 +246,47 @@ class LocationService {
       AppLogger.warning("Failed to update Firestore status to Offline: $e");
     }
 
+    // Update Firestore 'trips' collection to status = completed
+    try {
+      await FirebaseFirestore.instance.collection('trips').doc(tripId).update({
+        'endTime': FieldValue.serverTimestamp(),
+        'status': 'completed',
+      });
+    } catch (e) {
+      AppLogger.warning("Failed to update Firestore trips collection: $e");
+    }
+
+    // Delete Firestore 'active_trips' collection
+    try {
+      await FirebaseFirestore.instance.collection('active_trips').doc(tripId).delete();
+    } catch (e) {
+      AppLogger.warning("Failed to delete from Firestore active_trips: $e");
+    }
+
+    // Add to Firestore 'completed_trips' collection
+    try {
+      await FirebaseFirestore.instance.collection('completed_trips').doc(tripId).set({
+        'tripId': tripId,
+        'driverId': uid,
+        'driverName': tripData?['driverName'] ?? 'Driver',
+        'busNumber': busNumber,
+        'plateNumber': tripData?['plateNumber'] ?? '',
+        'from': tripData?['from'] ?? 'Unknown',
+        'to': tripData?['to'] ?? 'Unknown',
+        'gender': tripData?['gender'] ?? 'Combined',
+        'startTime': tripData?['startTime'] != null 
+            ? Timestamp.fromMillisecondsSinceEpoch(tripData!['startTime'] as int) 
+            : FieldValue.serverTimestamp(),
+        'endTime': FieldValue.serverTimestamp(),
+        'status': 'completed',
+        'scheduleId': tripData?['scheduleId'] ?? '',
+        'date': tripData?['date'] ?? DateTime.now().toIso8601String().substring(0, 10),
+        'revenue': 0.0,
+      });
+    } catch (e) {
+      AppLogger.warning("Failed to write to Firestore completed_trips collection: $e");
+    }
+
     // 3. 🧹 CLEANUP: Find any other 'active' trips that might be stuck and close them
     // This prevents "ghost" ongoing trips from appearing in history
     final snapshot = await _tripsRef.child(uid).orderByChild('status').equalTo('active').get();
@@ -195,8 +294,17 @@ class LocationService {
       final updates = <String, dynamic>{};
       final data = snapshot.value as Map;
       data.forEach((key, value) {
-        updates['$key/status'] = 'completed';
-        updates['$key/endTime'] = ServerValue.timestamp;
+        final stId = key.toString();
+        updates['$stId/status'] = 'completed';
+        updates['$stId/endTime'] = ServerValue.timestamp;
+        
+        // Also cleanup corresponding Firestore docs
+        FirebaseFirestore.instance.collection('trips').doc(stId).update({
+          'endTime': FieldValue.serverTimestamp(),
+          'status': 'completed',
+        }).catchError((_) {});
+        
+        FirebaseFirestore.instance.collection('active_trips').doc(stId).delete().catchError((_) {});
       });
       await _tripsRef.child(uid).update(updates);
     }

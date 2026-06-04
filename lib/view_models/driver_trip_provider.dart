@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:geolocator/geolocator.dart';
-
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:uni_transit/services/location_service.dart';
@@ -12,7 +12,7 @@ import 'package:uni_transit/core/constants/campus_locations.dart';
 import 'package:uni_transit/services/trip_alert_service.dart';
 import 'package:uni_transit/core/constants/custom_routes.dart';
 import 'package:uni_transit/models/eta_info.dart';
-
+import 'package:uni_transit/view_models/auth_provider.dart';
 class DriverTripState {
   final bool isTripStarted;
   final String? activeTripId;
@@ -22,6 +22,7 @@ class DriverTripState {
   final String? to;
   final String gender;
   final String departureTime;   // e.g. "07:30 AM" — shown on dashboard
+  final String scheduleId;       // ⚡ Added scheduleId
   final List<LatLng> routePoints;
   final String remainingDistance;
   final String remainingTime;
@@ -40,6 +41,7 @@ class DriverTripState {
     this.to,
     this.gender = "Combined",
     this.departureTime = "",
+    this.scheduleId = "",
     this.routePoints = const [],
     this.remainingDistance = "---",
     this.remainingTime = "---",
@@ -59,6 +61,7 @@ class DriverTripState {
     String? to,
     String? gender,
     String? departureTime,
+    String? scheduleId,
     List<LatLng>? routePoints,
     String? remainingDistance,
     String? remainingTime,
@@ -77,6 +80,7 @@ class DriverTripState {
       to: to ?? this.to,
       gender: gender ?? this.gender,
       departureTime: departureTime ?? this.departureTime,
+      scheduleId: scheduleId ?? this.scheduleId,
       routePoints: routePoints ?? this.routePoints,
       remainingDistance: remainingDistance ?? this.remainingDistance,
       remainingTime: remainingTime ?? this.remainingTime,
@@ -91,6 +95,7 @@ class DriverTripState {
 
 class DriverTripNotifier extends Notifier<DriverTripState> {
   final LocationService _locationService = LocationService();
+  StreamSubscription<DatabaseEvent>? _busStatusSubscription;
 
   // Throttle navigation refresh to avoid excessive API calls
   DateTime _lastRefresh = DateTime.fromMillisecondsSinceEpoch(0);
@@ -98,6 +103,17 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
 
   @override
   DriverTripState build() {
+    // Reset state automatically if the user logs out
+    ref.listen(authStateProvider, (previous, next) {
+      if (next.value == null) {
+        _busStatusSubscription?.cancel();
+        _busStatusSubscription = null;
+        state = DriverTripState();
+      }
+    });
+    ref.onDispose(() {
+      _busStatusSubscription?.cancel();
+    });
     return DriverTripState();
   }
 
@@ -131,6 +147,43 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
     }
   }
 
+  void _startListeningToBusStatus() {
+    _busStatusSubscription?.cancel();
+    _busStatusSubscription = FirebaseDatabase.instance
+        .ref('buses')
+        .child(state.busNumber)
+        .onValue
+        .listen((event) {
+      if (event.snapshot.value == null && state.isTripStarted) {
+        forceStopFromAdmin();
+      }
+    });
+  }
+
+  void forceStopFromAdmin() {
+    _busStatusSubscription?.cancel();
+    _busStatusSubscription = null;
+
+    state = state.copyWith(
+      isTripStarted: false,
+      activeTripId: null,
+      busNumber: "", // Clear bus info
+      plateNumber: "",
+      from: null, // Reset hubs
+      to: null,
+      scheduleId: "", // Clear schedule ID
+      routePoints: [], // Clear map path
+      remainingDistance: "---", // Reset indicators
+      remainingTime: "---",
+    );
+
+    NotificationService.show(
+      title: "Trip Terminated 🛑",
+      message: "Your active trip tracking has been stopped by the administrator.",
+      type: NotificationType.warning,
+    );
+  }
+
   String _calculateClockTime(String remainingStr) {
     try {
       int minutes = 0;
@@ -157,6 +210,7 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
     String? to,
     String? gender,
     String? departureTime,
+    String? scheduleId,
   }) {
     // Sanitize: ignore literal 'null' strings or empty from/to
     final safeFrom = (from != null && from.trim().isNotEmpty && from.trim().toLowerCase() != 'null')
@@ -175,6 +229,7 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
       departureTime: (departureTime != null && departureTime.trim().isNotEmpty)
           ? departureTime.trim()
           : null,
+      scheduleId: scheduleId,
     );
 
     if (safeFrom != null && safeTo != null) {
@@ -195,10 +250,12 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
           from: activeTrip['from'],
           to: activeTrip['to'],
           gender: activeTrip['gender'],
+          scheduleId: activeTrip['scheduleId'] ?? '',
         );
         // Fixed: now passes uid so restoreTracking can re-create RTDB entry
         await _locationService.restoreTracking(uid, state.busNumber);
         await _refreshNavigation();
+        _startListeningToBusStatus();
       }
     } catch (e) {
       AppLogger.error("Restore failed: $e");
@@ -342,6 +399,7 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
           lng: pos.longitude,
           remainingTime: initialTime,
           remainingDistance: initialDistance,
+          scheduleId: state.scheduleId,
         );
 
         final activeTrip = await _locationService.getActiveTrip(uid);
@@ -361,6 +419,7 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
         );
 
         await _refreshNavigation();
+        _startListeningToBusStatus();
 
         NotificationService.show(
           title: "Trip Started",
@@ -382,6 +441,8 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
       final oldTripId = state.activeTripId;
 
       // Terminate Trip: Perform a FULL RESET of the state
+      _busStatusSubscription?.cancel();
+      _busStatusSubscription = null;
       if (oldTripId != null) {
         await _locationService.stopSharingLocation(
           uid,
@@ -405,6 +466,7 @@ class DriverTripNotifier extends Notifier<DriverTripState> {
         plateNumber: "",
         from: null, // Reset hubs
         to: null,
+        scheduleId: "", // Clear schedule ID
         routePoints: [], // Clear map path
         remainingDistance: "---", // Reset indicators
         remainingTime: "---",
@@ -432,3 +494,10 @@ final driverTripProvider =
     NotifierProvider<DriverTripNotifier, DriverTripState>(
       () => DriverTripNotifier(),
     );
+
+final driverTripHistoryProvider = StreamProvider<List<Map<String, dynamic>>>((ref) {
+  final authState = ref.watch(authStateProvider);
+  final user = authState.value;
+  if (user == null) return Stream.value([]);
+  return LocationService().getTripHistoryStream(user.uid);
+});

@@ -3,12 +3,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:intl/intl.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:firebase_database/firebase_database.dart';
 import 'package:uni_transit/core/constants/app_colors.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
@@ -22,7 +18,6 @@ import 'package:uni_transit/services/notification_service.dart';
 import 'package:uni_transit/core/constants/campus_locations.dart';
 import 'package:uni_transit/models/eta_info.dart';
 import 'package:uni_transit/services/trip_alert_service.dart';
-import 'package:uni_transit/core/constants/custom_routes.dart';
 import 'package:uni_transit/view_models/route_provider.dart';
 import 'package:uni_transit/view_models/bus_provider.dart';
 import 'package:uni_transit/view_models/map_ui_provider.dart';
@@ -465,20 +460,6 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     );
   }
 
-  Future<void> _fetchRoadPath(LatLng start, LatLng end) async {
-    // Note: OSRM is kept as a local helper if needed later, but route points are managed by provider
-    final url =
-        'https://router.project-osrm.org/route/v1/driving/${start.longitude},${start.latitude};${end.longitude},${end.latitude}?overview=full&geometries=geojson';
-
-    try {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        // This is just a helper now, not updating local state directly
-      }
-    } catch (e) {
-      debugPrint("Error fetching road path: $e");
-    }
-  }
 
 
 
@@ -530,6 +511,45 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
     final hubsData = ref.watch(hubProvider).hubsData;
     final genderConfigs = ref.watch(genderConfigProvider).genderConfigs;
     final uiState = ref.watch(mapUiProvider);
+    final busData = ref.watch(busProvider).liveBusData;
+
+    final List<Map<String, dynamic>> nearestBuses = [];
+    busData.forEach((id, data) {
+      final lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
+      final lng = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+      if (lat == 0.0 || lng == 0.0) return;
+      
+      final busPos = LatLng(lat, lng);
+      
+      double distance = 9999999.0;
+      if (uiState.hasUserLocation) {
+        distance = const Distance().as(LengthUnit.Meter, uiState.userLocation, busPos);
+      }
+      
+      final destName = data['to'] as String?;
+      final destPos = destName != null ? _getHubLocation(destName) : null;
+      final etaInfo = (lat != 0.0 && lng != 0.0 && destPos != null)
+          ? EtaInfo.estimateFromCoordinates(LatLng(lat, lng), destPos)
+          : null;
+          
+      final etaText = data['remainingTime'] != null &&
+              (data['remainingTime'] as String).isNotEmpty &&
+              data['remainingTime'] != "---"
+          ? data['remainingTime']
+          : (etaInfo?.etaMarkerDisplay ?? "---");
+
+      nearestBuses.add({
+        'id': id,
+        'data': data,
+        'distance': distance,
+        'eta': etaText,
+        'position': busPos,
+      });
+    });
+
+    if (uiState.hasUserLocation) {
+      nearestBuses.sort((a, b) => (a['distance'] as double).compareTo(b['distance'] as double));
+    }
 
     // ⚡ SYNC: Listen to route changes to trigger map animation
     ref.listen<RouteState>(routeProvider, (previous, next) {
@@ -812,6 +832,92 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
               ],
             ),
           ),
+          if (nearestBuses.isNotEmpty)
+            Positioned(
+              left: 20,
+              right: 80,
+              bottom: 110,
+              child: SizedBox(
+                height: 70,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: nearestBuses.length,
+                  itemBuilder: (context, index) {
+                    final bus = nearestBuses[index];
+                    final double distMeters = bus['distance'];
+                    final String distText = distMeters > 999999
+                        ? "---"
+                        : (distMeters >= 1000
+                            ? "${(distMeters / 1000).toStringAsFixed(1)} km"
+                            : "${distMeters.toInt()} m");
+                    final String etaText = bus['eta'];
+                    
+                    final gender = (bus['data']['gender'] as String? ?? 'Combined').toLowerCase().trim();
+                    Color genderColor = AppColors.primaryNavy;
+                    if (gender.contains('girls')) {
+                      genderColor = Colors.pinkAccent;
+                    } else if (gender.contains('boys')) {
+                      genderColor = Colors.blueAccent;
+                    }
+
+                    return GestureDetector(
+                      onTap: () {
+                        _animatedMapMove(bus['position'], 15.5);
+                        _showBusDetails(bus['id'], Map<String, dynamic>.from(bus['data']));
+                      },
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 12),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.95),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: genderColor.withOpacity(0.2), width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundColor: genderColor.withOpacity(0.1),
+                              child: Icon(Icons.directions_bus_rounded, color: genderColor, size: 18),
+                            ),
+                            const SizedBox(width: 10),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  "Bus ${bus['id']}",
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 12,
+                                    color: AppColors.primaryNavy,
+                                  ),
+                                ),
+                                Text(
+                                  "$distText ($etaText)",
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 10,
+                                    color: Colors.grey[600],
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -934,6 +1040,11 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                   String driverName = currentBusData['driverName'] ?? "Driver";
                   String profileUrl = "";
                   bool isVerified = false;
+                  String phone = "";
+                  String email = "";
+                  String experience = "N/A";
+                  String cnic = "";
+                  String licenseNumber = "";
 
                   if (driverSnapshot.hasData && driverSnapshot.data!.exists) {
                     final driverData = driverSnapshot.data!.data() as Map<String, dynamic>?;
@@ -941,6 +1052,11 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                       driverName = driverData['name'] ?? driverName;
                       profileUrl = driverData['profileUrl'] ?? "";
                       isVerified = driverData['isVerified'] ?? false;
+                      phone = driverData['phoneNumber'] ?? "";
+                      email = driverData['email'] ?? "";
+                      experience = driverData['experience'] ?? "N/A";
+                      cnic = driverData['cnic'] ?? "";
+                      licenseNumber = driverData['licenseNumber'] ?? "";
                     }
                   }
 
@@ -991,21 +1107,11 @@ class _MapScreenState extends ConsumerState<MapScreen> with TickerProviderStateM
                                           driverName: driverName,
                                           profileUrl: profileUrl,
                                           isVerified: isVerified,
-                                          phone: driverSnapshot.hasData && driverSnapshot.data!.exists
-                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['phoneNumber'] ?? ""
-                                              : "",
-                                          email: driverSnapshot.hasData && driverSnapshot.data!.exists
-                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['email'] ?? ""
-                                              : "",
-                                          experience: driverSnapshot.hasData && driverSnapshot.data!.exists
-                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['experience'] ?? "N/A"
-                                              : "N/A",
-                                          cnic: driverSnapshot.hasData && driverSnapshot.data!.exists
-                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['cnic'] ?? ""
-                                              : "",
-                                          licenseNumber: driverSnapshot.hasData && driverSnapshot.data!.exists
-                                              ? (driverSnapshot.data!.data() as Map<String, dynamic>?)?['licenseNumber'] ?? ""
-                                              : "",
+                                          phone: phone,
+                                          email: email,
+                                          experience: experience,
+                                          cnic: cnic,
+                                          licenseNumber: licenseNumber,
                                         );
                                       },
                                       borderRadius: BorderRadius.circular(26),
@@ -2011,6 +2117,7 @@ class AnimatedBusMarker extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final gender = data['gender'] ?? 'Combined';
     final genderConfigs = ref.watch(genderConfigProvider).genderConfigs;
+    final uiState = ref.watch(mapUiProvider);
     
     Color markerColor = const Color(0xFF000080); // Default Navy
     
@@ -2035,6 +2142,27 @@ class AnimatedBusMarker extends ConsumerWidget {
         ? data['remainingTime']
         : (etaInfo?.etaMarkerDisplay ?? "---");
 
+    final busPos = LatLng(
+      (data['latitude'] as num?)?.toDouble() ?? 0.0,
+      (data['longitude'] as num?)?.toDouble() ?? 0.0,
+    );
+    final distanceToStudent = uiState.hasUserLocation &&
+            busPos.latitude != 0.0 &&
+            busPos.longitude != 0.0 &&
+            uiState.userLocation.latitude != 0.0 &&
+            uiState.userLocation.longitude != 0.0
+        ? const Distance().as(LengthUnit.Meter, busPos, uiState.userLocation)
+        : null;
+
+    String distText = "";
+    if (distanceToStudent != null) {
+      if (distanceToStudent < 1000) {
+        distText = " · ${distanceToStudent.toInt()}m";
+      } else {
+        distText = " · ${(distanceToStudent / 1000).toStringAsFixed(1)}km";
+      }
+    }
+
     return RepaintBoundary(
       child: GestureDetector(
         onTap: onTap,
@@ -2058,7 +2186,7 @@ class AnimatedBusMarker extends ConsumerWidget {
                     ],
                   ),
                   child: Text(
-                    etaText,
+                    "Bus $id$distText ($etaText)",
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 8,
