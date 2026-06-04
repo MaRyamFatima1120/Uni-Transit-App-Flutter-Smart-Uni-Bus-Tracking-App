@@ -612,6 +612,7 @@ class _DriverDashboardState extends ConsumerState<DriverDashboard>
                       bus: resolvedBus,
                       gender: mappedGender,
                       departureTime: displayTime,
+                      scheduleId: schedule.id,
                     );
                     Navigator.pop(context);
                     NotificationService.show(

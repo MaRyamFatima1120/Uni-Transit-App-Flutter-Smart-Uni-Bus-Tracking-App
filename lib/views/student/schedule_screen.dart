@@ -563,7 +563,51 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                     if (tripData is Map) {
                       final tSchedId = tripData['scheduleId']?.toString() ?? '';
                       final tDateStr = tripData['date']?.toString() ?? '';
-                      if (tSchedId == schedule.id && tDateStr == selectedDateStr) {
+                      
+                      bool isMatch = false;
+                      if (tSchedId.isNotEmpty) {
+                        isMatch = (tSchedId == schedule.id);
+                      } else {
+                        // Fallback match by parsing route
+                        final tFrom = tripData['from']?.toString().toLowerCase().trim() ?? '';
+                        final tTo = tripData['to']?.toString().toLowerCase().trim() ?? '';
+                        
+                        final routeStr = schedule.route;
+                        String sFrom = '';
+                        String sTo = '';
+                        if (routeStr.contains('➔')) {
+                          final parts = routeStr.split('➔');
+                          if (parts.length >= 2) {
+                            sFrom = parts[0].trim().toLowerCase();
+                            sTo = parts[1].trim().toLowerCase();
+                          }
+                        } else if (routeStr.contains('->')) {
+                          final parts = routeStr.split('->');
+                          if (parts.length >= 2) {
+                            sFrom = parts[0].trim().toLowerCase();
+                            sTo = parts[1].trim().toLowerCase();
+                          }
+                        } else if (routeStr.toLowerCase().contains(' to ')) {
+                          final match = RegExp(r'\s+to\s+', caseSensitive: false);
+                          final parts = routeStr.split(match);
+                          if (parts.length >= 2) {
+                            sFrom = parts[0].trim().toLowerCase();
+                            sTo = parts[1].trim().toLowerCase();
+                          }
+                        }
+                        
+                        // Check fuzzy match on names
+                        bool fromMatch = tFrom == sFrom || 
+                          ((tFrom.contains('abbasia') || tFrom.contains('old')) && (sFrom.contains('abbasia') || sFrom.contains('old'))) ||
+                          ((tFrom.contains('baghdad')) && (sFrom.contains('baghdad')));
+                        bool toMatch = tTo == sTo || 
+                          ((tTo.contains('abbasia') || tTo.contains('old')) && (sTo.contains('abbasia') || sTo.contains('old'))) ||
+                          ((tTo.contains('baghdad')) && (sTo.contains('baghdad')));
+                          
+                        isMatch = fromMatch && toMatch;
+                      }
+
+                      if (isMatch && tDateStr == selectedDateStr) {
                         final statusVal = (tripData['status']?.toString() ?? '').toLowerCase();
                         if (statusVal == 'active') {
                           scheduleStatus = 'ACTIVE';

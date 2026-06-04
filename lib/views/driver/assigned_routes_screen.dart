@@ -318,9 +318,17 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
       try {
         final matchingTrip = tripHistory.firstWhere(
           (t) {
-            // Match by schedule ID
+            // Match by schedule ID if present, otherwise fallback to route matching
             final tSchedId = t['scheduleId']?.toString() ?? '';
-            if (tSchedId != schedule.id) return false;
+            if (tSchedId.isNotEmpty) {
+              if (tSchedId != schedule.id) return false;
+            } else {
+              final tFrom = t['from']?.toString().toLowerCase().trim() ?? '';
+              final tTo = t['to']?.toString().toLowerCase().trim() ?? '';
+              final sFrom = parsed['from']?.toString().toLowerCase().trim() ?? '';
+              final sTo = parsed['to']?.toString().toLowerCase().trim() ?? '';
+              if (tFrom != sFrom || tTo != sTo) return false;
+            }
             
             // Match by date
             final tDateStr = t['date']?.toString() ?? '';
@@ -1028,7 +1036,7 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       ElevatedButton(
-                        onPressed: (status == 'COMPLETED' || status == 'MISSED' || isFuture || (tripState.isTripStarted && !isActive)) ? null : () {
+                        onPressed: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) ? null : () {
                           final nav = Navigator.of(context);
 
                           // 1. Pre-fill trip selection in driverTripProvider FIRST (before pop)
@@ -1056,14 +1064,10 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) 
                               ? Colors.grey.shade300 
-                              : (status == 'MISSED'
-                                  ? Colors.red.withValues(alpha: 0.1)
-                                  : (isActive ? Colors.green.shade500 : AppColors.primaryNavy)),
+                              : (isActive ? Colors.green.shade500 : AppColors.primaryNavy),
                           foregroundColor: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) 
                               ? Colors.grey.shade600 
-                              : (status == 'MISSED' 
-                                  ? Colors.red.shade700
-                                  : Colors.white),
+                              : Colors.white,
                           elevation: 0,
                           minimumSize: const Size(0, 40),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
@@ -1077,13 +1081,11 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                             Text(
                               status == 'COMPLETED'
                                   ? "COMPLETED" 
-                                  : (status == 'MISSED'
-                                      ? "MISSED"
-                                      : (isFuture 
-                                          ? "UPCOMING" 
-                                          : (isActive 
-                                              ? "ACTIVE NOW" 
-                                              : (tripState.isTripStarted ? "TRIP IN PROGRESS" : "SELECT ROUTE")))),
+                                  : (isFuture 
+                                      ? "UPCOMING" 
+                                      : (isActive 
+                                          ? "ACTIVE NOW" 
+                                          : (tripState.isTripStarted ? "TRIP IN PROGRESS" : "SELECT ROUTE"))),
                               style: GoogleFonts.poppins(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
@@ -1094,13 +1096,11 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                             Icon(
                               status == 'COMPLETED' 
                                   ? Icons.check_circle_rounded 
-                                  : (status == 'MISSED'
-                                      ? Icons.cancel_rounded
-                                      : (isFuture 
-                                          ? Icons.lock_rounded 
-                                          : (tripState.isTripStarted && !isActive 
-                                              ? Icons.block_rounded 
-                                              : Icons.arrow_forward_ios_rounded))), 
+                                  : (isFuture 
+                                      ? Icons.lock_rounded 
+                                      : (tripState.isTripStarted && !isActive 
+                                          ? Icons.block_rounded 
+                                          : Icons.arrow_forward_ios_rounded)), 
                               size: 12,
                             ),
                           ],
