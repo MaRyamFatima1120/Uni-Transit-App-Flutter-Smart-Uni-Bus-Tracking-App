@@ -307,10 +307,8 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
               if (isAM && hour == 12) hour = 0;
               
               final scheduleTime = DateTime(now.year, now.month, now.day, hour, minute);
-              if (now.isAfter(scheduleTime.add(const Duration(minutes: 30)))) {
-                isPassed = true;
-              }
               if (now.isAfter(scheduleTime.add(const Duration(hours: 1)))) {
+                isPassed = true;
                 isOverOneHourLate = true;
               }
             }
@@ -388,6 +386,8 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
             status = "MISSED";
           } else if (isFuture) {
             status = "UPCOMING";
+          } else {
+            status = "READY";
           }
         }
       } catch (e) {
@@ -396,6 +396,8 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
           status = "MISSED";
         } else if (isFuture) {
           status = "UPCOMING";
+        } else {
+          status = "READY";
         }
       }
 
@@ -671,23 +673,7 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
-                      ),
-                      child: Text(
-                        "ASSIGNED WORKLOAD",
-                        style: GoogleFonts.poppins(
-                          color: Colors.green.shade400,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.5,
-                        ),
-                      ),
-                    ),
+                    
                     const SizedBox(height: 12),
                     Text(
                       "Assigned Routes",
@@ -904,78 +890,84 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                   // Top Info Row: Type tags & Live details
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: lightAccentColor,
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: accentColor.withValues(alpha: 0.2)),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(genderIcon, size: 14, color: accentColor),
-                                const SizedBox(width: 4),
-                                Text(
-                                  genderText,
-                                  style: GoogleFonts.poppins(
-                                    color: accentColor,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 0.5,
+                      Expanded(
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: lightAccentColor,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: accentColor.withValues(alpha: 0.2)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(genderIcon, size: 14, color: accentColor),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    genderText,
+                                    style: GoogleFonts.poppins(
+                                      color: accentColor,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.5,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.directions_bus_rounded, size: 14, color: AppColors.primaryNavy),
-                                const SizedBox(width: 4),
-                                Text(
-                                  route['busId'] ?? 'N/A',
-                                  style: GoogleFonts.poppins(
-                                    color: AppColors.primaryNavy,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.directions_bus_rounded, size: 14, color: AppColors.primaryNavy),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    route['busId'] ?? 'N/A',
+                                    style: GoogleFonts.poppins(
+                                      color: AppColors.primaryNavy,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: Colors.blue.withValues(alpha: 0.08),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
-                            ),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.access_time_filled_rounded, size: 14, color: Colors.blue),
-                                const SizedBox(width: 4),
-                                Text(
-                                  route['time'] ?? 'Pending',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.blue,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.access_time_filled_rounded, size: 14, color: Colors.blue),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    route['time'] ?? 'Pending',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.blue,
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                       if (isActive || status == 'ACTIVE') 
                         const _PulsingLiveBadge()
