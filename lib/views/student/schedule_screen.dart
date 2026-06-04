@@ -605,6 +605,14 @@ class _ScheduleScreenState extends ConsumerState<ScheduleScreen> {
                           ((tTo.contains('baghdad')) && (sTo.contains('baghdad')));
                           
                         isMatch = fromMatch && toMatch;
+
+                        if (isMatch) {
+                          final tDepTime = tripData['departureTime']?.toString().toLowerCase().replaceAll(' ', '') ?? '';
+                          final sDepTime = schedule.departureTime.toLowerCase().replaceAll(' ', '');
+                          if (tDepTime.isNotEmpty && sDepTime.isNotEmpty && tDepTime != sDepTime) {
+                            isMatch = false;
+                          }
+                        }
                       }
 
                       if (isMatch && tDateStr == selectedDateStr) {

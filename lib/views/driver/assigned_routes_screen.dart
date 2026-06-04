@@ -328,6 +328,13 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
               final sFrom = parsed['from']?.toString().toLowerCase().trim() ?? '';
               final sTo = parsed['to']?.toString().toLowerCase().trim() ?? '';
               if (tFrom != sFrom || tTo != sTo) return false;
+
+              // Match departure time if present
+              final tDepTime = t['departureTime']?.toString().toLowerCase().replaceAll(' ', '') ?? '';
+              final sDepTime = schedule.departureTime.toLowerCase().replaceAll(' ', '');
+              if (tDepTime.isNotEmpty && sDepTime.isNotEmpty && tDepTime != sDepTime) {
+                return false;
+              }
             }
             
             // Match by date

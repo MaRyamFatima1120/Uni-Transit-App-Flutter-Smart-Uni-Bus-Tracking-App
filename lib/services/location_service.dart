@@ -134,6 +134,7 @@ class LocationService {
       'startTime': ServerValue.timestamp,
       'status': 'active',
       'scheduleId': scheduleId,
+      'departureTime': departureTime,
       'date': todayStr,
     });
 
@@ -158,6 +159,7 @@ class LocationService {
         'startTime': FieldValue.serverTimestamp(),
         'status': 'active',
         'scheduleId': scheduleId,
+        'departureTime': departureTime,
         'date': todayStr,
       });
     } catch (e) {
@@ -178,6 +180,7 @@ class LocationService {
         'startTime': FieldValue.serverTimestamp(),
         'status': 'active',
         'scheduleId': scheduleId,
+        'departureTime': departureTime,
         'date': todayStr,
       });
     } catch (e) {
