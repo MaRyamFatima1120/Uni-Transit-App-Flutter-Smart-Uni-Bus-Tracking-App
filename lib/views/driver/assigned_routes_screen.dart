@@ -279,11 +279,13 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
 
       bool isPassed = false;
       bool isFuture = false;
+      bool isOverOneHourLate = false;
       final now = DateTime.now();
       if (selectedDate.year < now.year || 
          (selectedDate.year == now.year && selectedDate.month < now.month) ||
          (selectedDate.year == now.year && selectedDate.month == now.month && selectedDate.day < now.day)) {
         isPassed = true;
+        isOverOneHourLate = true;
       } else if (selectedDate.year > now.year || 
          (selectedDate.year == now.year && selectedDate.month > now.month) ||
          (selectedDate.year == now.year && selectedDate.month == now.month && selectedDate.day > now.day)) {
@@ -307,6 +309,9 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
               final scheduleTime = DateTime(now.year, now.month, now.day, hour, minute);
               if (now.isAfter(scheduleTime.add(const Duration(minutes: 30)))) {
                 isPassed = true;
+              }
+              if (now.isAfter(scheduleTime.add(const Duration(hours: 1)))) {
+                isOverOneHourLate = true;
               }
             }
           } catch (_) {}
@@ -405,6 +410,7 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
         "gender": mappedGender,
         "isPassed": isPassed,
         "isFuture": isFuture,
+        "isOverOneHourLate": isOverOneHourLate,
         "status": status,
         "isActive": tripState.isTripStarted && 
                     (tripState.scheduleId.isNotEmpty 
@@ -946,6 +952,29 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                               ],
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.access_time_filled_rounded, size: 14, color: Colors.blue),
+                                const SizedBox(width: 4),
+                                Text(
+                                  route['time'] ?? 'Pending',
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.blue,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ],
                       ),
                       if (isActive || status == 'ACTIVE') 
@@ -973,26 +1002,49 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                             ],
                           ),
                         )
+                      else if (status == 'COMPLETED')
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.check_circle_rounded, size: 14, color: Colors.green.shade700),
+                              const SizedBox(width: 4),
+                              Text(
+                                "COMPLETED",
+                                style: GoogleFonts.poppins(
+                                  color: Colors.green.shade700,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
                       else
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: (status == 'COMPLETED' || isFuture) ? Colors.grey.shade100 : Colors.green.withValues(alpha: 0.1),
+                            color: isFuture ? Colors.grey.shade100 : Colors.green.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: (status == 'COMPLETED' || isFuture) ? Colors.grey.shade300 : Colors.green.withValues(alpha: 0.2)),
+                            border: Border.all(color: isFuture ? Colors.grey.shade300 : Colors.green.withValues(alpha: 0.2)),
                           ),
                           child: Row(
                             children: [
                               Icon(
                                 isFuture ? Icons.lock_outline_rounded : Icons.access_time_filled_rounded,
                                 size: 14, 
-                                color: (status == 'COMPLETED' || isFuture) ? Colors.grey.shade500 : Colors.green.shade700,
+                                color: isFuture ? Colors.grey.shade500 : Colors.green.shade700,
                               ),
                               const SizedBox(width: 4),
                               Text(
-                                route['time'] ?? 'Pending',
+                                isFuture ? "UPCOMING" : "READY",
                                 style: GoogleFonts.poppins(
-                                  color: (status == 'COMPLETED' || isFuture) ? Colors.grey.shade600 : Colors.green.shade700,
+                                  color: isFuture ? Colors.grey.shade600 : Colors.green.shade700,
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -1039,82 +1091,83 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
                   const SizedBox(height: 24),
 
                   // Bottom action buttons (Stops count removed)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      ElevatedButton(
-                        onPressed: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) ? null : () {
-                          final nav = Navigator.of(context);
+                  if (!(route['isOverOneHourLate'] == true && status == 'MISSED'))
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        ElevatedButton(
+                          onPressed: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) ? null : () {
+                            final nav = Navigator.of(context);
 
-                          // 1. Pre-fill trip selection in driverTripProvider FIRST (before pop)
-                          ref.read(driverTripProvider.notifier).updateInputs(
-                            from: route['from'],
-                            to: route['to'],
-                            bus: (assignedBus.isNotEmpty && assignedBus.toLowerCase() != 'tba') ? assignedBus : (route['busId'] ?? ''),
-                            gender: route['gender'],
-                            departureTime: route['time'],
-                            scheduleId: route['id'],
-                          );
+                            // 1. Pre-fill trip selection in driverTripProvider FIRST (before pop)
+                            ref.read(driverTripProvider.notifier).updateInputs(
+                              from: route['from'],
+                              to: route['to'],
+                              bus: (assignedBus.isNotEmpty && assignedBus.toLowerCase() != 'tba') ? assignedBus : (route['busId'] ?? ''),
+                              gender: route['gender'],
+                              departureTime: route['time'],
+                              scheduleId: route['id'],
+                            );
 
-                          // 2. Show notification
-                          NotificationService.show(
-                            title: "Route Selected",
-                            message: "${route['from']} ➔ ${route['to']} · ${route['time']}",
-                            type: NotificationType.success,
-                          );
+                            // 2. Show notification
+                            NotificationService.show(
+                              title: "Route Selected",
+                              message: "${route['from']} ➔ ${route['to']} · ${route['time']}",
+                              type: NotificationType.success,
+                            );
 
-                          // 3. Navigate back AFTER state is updated
-                          if (mounted) {
-                            nav.pop();
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) 
-                              ? Colors.grey.shade300 
-                              : (isActive ? Colors.green.shade500 : AppColors.primaryNavy),
-                          foregroundColor: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) 
-                              ? Colors.grey.shade600 
-                              : Colors.white,
-                          elevation: 0,
-                          minimumSize: const Size(0, 40),
-                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                            // 3. Navigate back AFTER state is updated
+                            if (mounted) {
+                              nav.pop();
+                            }
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) 
+                                ? Colors.grey.shade300 
+                                : (isActive ? Colors.green.shade500 : AppColors.primaryNavy),
+                            foregroundColor: (status == 'COMPLETED' || isFuture || (tripState.isTripStarted && !isActive)) 
+                                ? Colors.grey.shade600 
+                                : Colors.white,
+                            elevation: 0,
+                            minimumSize: const Size(0, 40),
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                status == 'COMPLETED'
+                                    ? "COMPLETED" 
+                                    : (isFuture 
+                                        ? "UPCOMING" 
+                                        : (isActive 
+                                            ? "ACTIVE NOW" 
+                                            : (tripState.isTripStarted ? "TRIP IN PROGRESS" : "SELECT ROUTE"))),
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Icon(
+                                status == 'COMPLETED' 
+                                    ? Icons.check_circle_rounded 
+                                    : (isFuture 
+                                        ? Icons.lock_rounded 
+                                        : (tripState.isTripStarted && !isActive 
+                                            ? Icons.block_rounded 
+                                            : Icons.arrow_forward_ios_rounded)), 
+                                size: 12,
+                              ),
+                            ],
                           ),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              status == 'COMPLETED'
-                                  ? "COMPLETED" 
-                                  : (isFuture 
-                                      ? "UPCOMING" 
-                                      : (isActive 
-                                          ? "ACTIVE NOW" 
-                                          : (tripState.isTripStarted ? "TRIP IN PROGRESS" : "SELECT ROUTE"))),
-                              style: GoogleFonts.poppins(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Icon(
-                              status == 'COMPLETED' 
-                                  ? Icons.check_circle_rounded 
-                                  : (isFuture 
-                                      ? Icons.lock_rounded 
-                                      : (tripState.isTripStarted && !isActive 
-                                          ? Icons.block_rounded 
-                                          : Icons.arrow_forward_ios_rounded)), 
-                              size: 12,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ),
             ),
