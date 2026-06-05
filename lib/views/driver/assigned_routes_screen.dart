@@ -316,6 +316,7 @@ class _AssignedRoutesScreenState extends ConsumerState<AssignedRoutesScreen> {
         }
       }
 
+
       // ⚡ CALCULATE TRIP STATUS
       String status = "UPCOMING";
       try {

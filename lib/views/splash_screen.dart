@@ -136,11 +136,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
             ],
           ),
         ),
-        child: FadeTransition(
-          opacity: _fadeAnimation,
-          child: Stack(
-            children: [
-              Center(
+        child: Stack(
+          children: [
+            Center(
+              child: FadeTransition(
+                opacity: _fadeAnimation,
                 child: ScaleTransition(
                   scale: _scaleAnimation,
                   child: Column(
@@ -201,22 +201,32 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   ),
                 ),
               ),
-              Positioned(
-                bottom: 60,
-                left: 0,
-                right: 0,
-                child: Column(
-                  children: [
-                    const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white24),
-                      ),
+            ),
+            Positioned(
+              bottom: 60,
+              left: 0,
+              right: 0,
+              child: Column(
+                children: [
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: AnimatedBuilder(
+                      animation: _fadeAnimation,
+                      builder: (context, child) {
+                        return CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white.withValues(alpha: 0.24 * _fadeAnimation.value),
+                          ),
+                        );
+                      },
                     ),
-                    const SizedBox(height: 32),
-                    Text(
+                  ),
+                  const SizedBox(height: 32),
+                  FadeTransition(
+                    opacity: _fadeAnimation,
+                    child: Text(
                       "THE ISLAMIA UNIVERSITY OF BAHAWALPUR",
                       textAlign: TextAlign.center,
                       style: GoogleFonts.poppins(
@@ -226,11 +236,11 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

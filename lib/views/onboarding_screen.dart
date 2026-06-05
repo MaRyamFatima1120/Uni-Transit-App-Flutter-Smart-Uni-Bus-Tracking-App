@@ -305,12 +305,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                         alignment: Alignment.center,
                         children: [
                           // Soft Grid Pattern
-                          Opacity(
-                            opacity: 0.08,
-                            child: CustomPaint(
-                              size: Size.infinite,
-                              painter: GridPainter(),
-                            ),
+                          CustomPaint(
+                            size: Size.infinite,
+                            painter: const GridPainter(),
                           ),
                           // Floor Shadow under the image
                           Positioned(
@@ -320,21 +317,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerPr
                               builder: (context, child) {
                                 return Transform.scale(
                                   scale: 1.0 - (0.15 * _floatingAnimation.value),
-                                  child: Opacity(
-                                    opacity: 0.8 - (0.3 * _floatingAnimation.value),
-                                    child: Container(
-                                      width: 140,
-                                      height: 10,
-                                      decoration: const BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black,
-                                            blurRadius: 10,
-                                            spreadRadius: 2,
-                                          ),
-                                        ],
-                                      ),
+                                  child: Container(
+                                    width: 140,
+                                    height: 10,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.8 - (0.3 * _floatingAnimation.value)),
+                                          blurRadius: 10,
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 );
@@ -433,10 +427,13 @@ class OnboardingData {
 }
 
 class GridPainter extends CustomPainter {
+  final double opacity;
+  const GridPainter({this.opacity = 0.08});
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.2)
+      ..color = Colors.white.withValues(alpha: 0.2 * opacity)
       ..strokeWidth = 1.0;
 
     const double step = 20.0;

@@ -122,22 +122,19 @@ class AboutScreen extends ConsumerWidget {
                 const SizedBox(height: 60),
                 
                 // IUB Branding
-                Opacity(
-                  opacity: 0.7,
-                  child: Column(
-                    children: [
-                      Text(
-                        appInfo.university.isEmpty ? "THE ISLAMIA UNIVERSITY OF BAHAWALPUR" : appInfo.university.toUpperCase(), 
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.poppins(
-                          fontSize: 10, 
-                          fontWeight: FontWeight.w800, 
-                          color: AppColors.textSecondary, 
-                          letterSpacing: 1.5
-                        )
-                      ),
-                    ],
-                  ),
+                Column(
+                  children: [
+                    Text(
+                      appInfo.university.isEmpty ? "THE ISLAMIA UNIVERSITY OF BAHAWALPUR" : appInfo.university.toUpperCase(), 
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.poppins(
+                        fontSize: 10, 
+                        fontWeight: FontWeight.w800, 
+                        color: AppColors.textSecondary.withValues(alpha: 0.7), 
+                        letterSpacing: 1.5
+                      )
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 60),
               ],
